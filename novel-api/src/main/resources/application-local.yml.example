@@ -1,0 +1,30 @@
+# ============================================================
+# 本地私密配置模板
+#
+#   复制一份：  cp application-local.yml.example application-local.yml
+#   然后填密码：application-local.yml 已被 .gitignore 忽略，不会进 Git
+#
+# 为什么单独拆一层，而不是直接改 application.yml：
+#   application.yml 是要提交到仓库的，里面出现明文密码，哪天仓库转公开或者
+#   拉了个 fork，密码就跟着走了。覆盖层是 Spring Boot 2.4+ 的标准做法：
+#   spring.config.import 里的 optional: 前缀保证文件不存在时也能正常启动。
+# ============================================================
+
+spring:
+  datasource:
+    username: root
+    password: 在这里填你的 MySQL 密码
+
+  # 如果本机 Redis / RabbitMQ 也需要改，一起写在这里
+  # data:
+  #   redis:
+  #     password: xxx
+  # rabbitmq:
+  #   password: xxx
+
+novel:
+  storage:
+    # 想换成自己的 MinIO 账号就改这里
+    # access-key: novel
+    # secret-key: novel12345
+    bucket: novel

@@ -1,0 +1,143 @@
+server:
+  port: ${NOVEL_SERVER_PORT:8080}
+  shutdown: graceful
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
+    # 请求体大小上限，导入接口以后要调大
+    max-http-form-post-size: 10MB
+
+spring:
+  application:
+    name: novel
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+  # 本地私密配置覆盖层：文件存在就加载，不存在也不报错。
+  # 数据库密码这类东西放 application-local.yml（已被 .gitignore 忽略），永远不要写进本文件。
+  config:
+    import: optional:classpath:application-local.yml
+
+  datasource:
+    # 所有连接参数都走环境变量，本地/CI/服务器三套环境共用一份配置
+    url: jdbc:mysql://${NOVEL_DB_HOST:127.0.0.1}:${NOVEL_DB_PORT:3306}/${NOVEL_DB_NAME:novel}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
+    username: ${NOVEL_DB_USER:root}
+    password: ${NOVEL_DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: novel-hikari
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+      # 连接泄漏检测：借出超过 30s 未归还就打警告，定位忘记 close 的代码
+      leak-detection-threshold: 30000
+
+  data:
+    redis:
+      host: ${NOVEL_REDIS_HOST:127.0.0.1}
+      port: ${NOVEL_REDIS_PORT:6379}
+      password: ${NOVEL_REDIS_PASSWORD:}
+      database: ${NOVEL_REDIS_DB:0}
+      timeout: 2s
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: 1s
+
+  rabbitmq:
+    host: ${NOVEL_MQ_HOST:127.0.0.1}
+    port: ${NOVEL_MQ_PORT:5672}
+    username: ${NOVEL_MQ_USER:guest}
+    password: ${NOVEL_MQ_PASSWORD:guest}
+    virtual-host: /
+    # 生产者确认：消息真的进了 broker 才会回调 ack，配合 Outbox 保证不丢
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 20
+        concurrency: 2
+        max-concurrency: 8
+        # 不在这里做无限重试，失败直接进死信队列，由人工/补偿任务处理
+        default-requeue-rejected: false
+
+  elasticsearch:
+    uris: ${NOVEL_ES_URI:http://127.0.0.1:9200}
+    connection-timeout: 3s
+    socket-timeout: 30s
+
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: Asia/Shanghai
+    date-format: yyyy-MM-dd HH:mm:ss
+    serialization:
+      write-dates-as-timestamps: false
+
+flyway:
+  enabled: true
+  locations: classpath:db/migration
+  baseline-on-migrate: true
+  validate-on-migrate: true
+  # 迁移脚本写得慢也不要紧，但别让它无限等锁
+  connect-retries: 3
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # 开发期打印 SQL；上线前换成 Slf4jImpl 并调到 debug 级别
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+novel:
+  storage:
+    endpoint: ${NOVEL_MINIO_ENDPOINT:http://127.0.0.1:9000}
+    public-endpoint: ${NOVEL_MINIO_PUBLIC_ENDPOINT:http://127.0.0.1:9000}
+    access-key: ${NOVEL_MINIO_ACCESS_KEY:novel}
+    secret-key: ${NOVEL_MINIO_SECRET_KEY:novel12345}
+    bucket: ${NOVEL_MINIO_BUCKET:novel}
+    region: us-east-1
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: method
+    display-request-duration: true
+  default-produces-media-type: application/json
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{traceId:-no-trace}] %logger{32} - %msg%n"
+  level:
+    root: info
+    com.novel: debug
+    # MyBatis Mapper 的 SQL 与参数（debug 才会输出）
+    com.novel.infra.persistence: debug

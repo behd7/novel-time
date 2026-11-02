@@ -1,0 +1,59 @@
+# 本机开发用中间件
+# 只放「Windows 主机上没有」的东西：Elasticsearch、MinIO
+# MySQL / Redis / RabbitMQ 直接连 Windows 主机（WSL 走 mirrored 网络，127.0.0.1 可直达）
+#
+# 用法：
+#   docker compose -f deploy/docker-compose.yml up -d
+#   docker compose -f deploy/docker-compose.yml ps
+#   docker compose -f deploy/docker-compose.yml down          # 停容器，保留数据卷
+#   docker compose -f deploy/docker-compose.yml down -v       # 连数据一起删
+name: novel-dev
+
+services:
+  elasticsearch:
+    image: elasticsearch:8.13.0
+    container_name: novel-es
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.ml.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx1g
+      - ingest.geoip.downloader.enabled=false
+      - bootstrap.memory_lock=false
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: novel-minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=novel
+      - MINIO_ROOT_PASSWORD=novel12345
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # 控制台 http://127.0.0.1:9001
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  es-data:
+  minio-data:

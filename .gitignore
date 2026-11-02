@@ -1,0 +1,27 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### VS Code ###
+.vscode/
+
+### OS ###
+.DS_Store
+
+### 本地配置（密码、密钥不要提交）###
+**/application-local.yml
+**/application-local.yaml
+.env
+deploy/data/
+
+### 日志 ###
+logs/
+*.log
