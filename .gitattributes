@@ -1,0 +1,24 @@
+# 统一行尾，避免 Windows 编辑器保存后把 LF 改成 CRLF。
+#
+# 这条对 Flyway 尤其重要：迁移脚本的校验和是按文件字节内容算的，
+# 行尾一变 checksum 就对不上，CI 或队友机器上会直接报
+# "Migration checksum mismatch"。代码本身无所谓，SQL 脚本必须锁死 LF。
+* text=auto eol=lf
+
+# Windows 批处理必须是 CRLF，否则 cmd.exe 会解析异常
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不要做行尾转换
+*.jar   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.zip   binary
+*.epub  binary
+
+# 让 GitHub 语言统计把 SQL 认得准一点
+*.sql   text eol=lf
