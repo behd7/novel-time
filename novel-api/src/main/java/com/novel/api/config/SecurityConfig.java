@@ -5,6 +5,7 @@ import com.novel.api.security.JwtAuthenticationFilter;
 import com.novel.api.security.RestAccessDeniedHandler;
 import com.novel.api.security.RestAuthenticationEntryPoint;
 import com.novel.core.user.port.TokenPort;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -36,6 +37,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class SecurityConfig {
 
     /** 完全公开的路径。 */
@@ -62,6 +64,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_PATHS).permitAll()
+                        // 阅读入口免登录：列表、详情、目录、正文、分类
+                        .requestMatchers(HttpMethod.GET, "/api/v1/novels/**", "/api/v1/categories").permitAll()
                         // 顺序要点：更精确的 /users/me 必须排在 /users/* 前面
                         .requestMatchers(HttpMethod.GET, "/api/v1/users/me").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/users/*").permitAll()

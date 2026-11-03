@@ -1,0 +1,17 @@
+# 导入专用 profile：不起 Web 服务，跑完 NovelImportRunner 自动退出
+spring:
+  main:
+    web-application-type: none
+  # 导入不是常驻服务，不需要连接池撑那么大
+  datasource:
+    hikari:
+      maximum-pool-size: 4
+
+novel:
+  import:
+    # 默认读仓库里的样例，可用 --novel.import.dir=... 或 NOVEL_IMPORT_DIR 覆盖
+    dir: ${NOVEL_IMPORT_DIR:deploy/samples}
+
+logging:
+  level:
+    com.novel: info

@@ -122,17 +122,50 @@ curl http://127.0.0.1:8080/api/v1/users/me -H "Authorization: Bearer $ACCESS_TOK
 ### 测试
 
 ```bash
-mvn test                                    # 39 个用例（含 Testcontainers，需要 Docker）
+mvn test                                    # 55 个用例（含 Testcontainers，需要 Docker）
 mvn test -Dtest=ArchitectureTest            # 只跑架构约束
 mvn test -Dtest=AuthFlowIntegrationTest     # 认证链路端到端（起 MySQL + Redis 容器）
 mvn test -Dtest=AuthServiceTest             # 认证业务逻辑单元测试（纯 Mock，1 秒内跑完）
+mvn test -Dtest=ReadingFlowIntegrationTest  # 导入→列表→正文→书架端到端
+mvn test -Dtest=TxtNovelParserTest          # TXT 解析器纯单测
 ```
+
+## 阅读
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/api/v1/novels` | 否 | 列表，`categoryId` / `status` / `sort=latest\|newest\|wordCount\|hot` |
+| GET | `/api/v1/novels/{id}` | 否 | 详情，含末章信息；每次访问累加一次阅读数 |
+| GET | `/api/v1/novels/{id}/chapters` | 否 | 目录，按 `seq` 升序分页 |
+| GET | `/api/v1/novels/{id}/chapters/{seq}` | 否 | 正文，带 `prevSeq` / `nextSeq` |
+| GET | `/api/v1/categories` | 否 | 两级分类（扁平返回，前端拼树） |
+| GET | `/api/v1/bookshelf` | 是 | 我的书架，按最近阅读倒序，带 `hasUpdate` |
+| POST | `/api/v1/bookshelf` | 是 | 加入书架（幂等） |
+| DELETE | `/api/v1/bookshelf/{novelId}` | 是 | 移出书架（物理删除，可再次加入） |
+| PUT | `/api/v1/bookshelf/{novelId}/progress` | 是 | 更新进度 `{"seq": 3}` |
+
+### 导入小说
+
+仓库自带三本样书（`deploy/samples/*.txt`），格式是「可选头部 + `---` + 按 `第N章` 切分」：
+
+```bash
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
+  --spring.profiles.active=import --novel.import.dir=deploy/samples
+```
+
+导完自动退出；**同名书会跳过**，所以命令可以放心重跑。
+
+### 缓存与计数
+
+- 章节正文缓存 2 小时（`novel:chapter:text:{id}`），分类缓存 10 分钟（`novel:categories`）
+- 小说详情**不缓存**：主键查询 1ms，为它维护失效逻辑不划算
+- 阅读数先累加到 `novel:view:delta`（Redis Hash），由 `ViewCountFlushJob` 每 60 秒合并回库
 
 ## 进度
 
 - [x] **M0 骨架**：多模块工程、Flyway 迁移、统一响应、全局异常、traceId、Swagger、中间件体检
 - [x] **M1 用户与认证**：注册/登录/刷新/登出、JWT 双令牌 + Redis 白名单、Spring Security、登录限流、个人资料、他人主页
-- [ ] M2 小说/章节/导入/阅读/书架
+- [x] **M2 阅读**：TXT 解析与幂等导入、小说列表/详情、目录、正文 + 缓存、阅读数写缓冲、书架
 - [ ] M3 评分与书评
 - [ ] M4 搜索（ES + IK + Outbox 同步）
 - [ ] M5 榜单
