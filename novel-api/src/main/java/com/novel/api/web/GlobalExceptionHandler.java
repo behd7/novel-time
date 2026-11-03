@@ -8,6 +8,8 @@ import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -81,6 +83,27 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public Result<Void> handleNoResource(NoResourceFoundException e) {
         return Result.fail(ResultCode.NOT_FOUND, "接口不存在: " + e.getResourcePath());
+    }
+
+    /**
+     * 方法级鉴权失败（{@code @PreAuthorize} 拒绝）。
+     *
+     * <p>必须显式声明：否则会被下面的 {@code Exception.class} 兜底成 500 ——
+     * "没有权限"变成"服务器错误"，监控里会出现一堆假告警，前端也没法区分。
+     * 过滤器链上的 403 由 {@code RestAccessDeniedHandler} 处理，两条路径返回同一份 JSON。
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public Result<Void> handleAccessDenied(AccessDeniedException e) {
+        log.warn("越权访问被拒绝: {}", e.getMessage());
+        return Result.fail(ResultCode.FORBIDDEN);
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public Result<Void> handleAuthentication(AuthenticationException e) {
+        log.warn("认证失败: {}", e.getMessage());
+        return Result.fail(ResultCode.UNAUTHORIZED);
     }
 
     @ExceptionHandler(Exception.class)

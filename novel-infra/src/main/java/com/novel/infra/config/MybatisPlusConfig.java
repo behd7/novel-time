@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.BlockAttackInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.OptimisticLockerInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -16,8 +17,13 @@ import org.springframework.context.annotation.Configuration;
  *
  * <p>{@link BlockAttackInnerInterceptor} 是救命的：它拦截没有 where 条件的
  * update/delete，防止一次手滑把整张表清空。开发环境就该开着，不要等到出事才想起。
+ *
+ * <p>{@code @MapperScan} 必须指向 infra 的包：MyBatis 的自动扫描只覆盖启动类所在包
+ * （{@code com.novel.api}），而 Mapper 全在 {@code com.novel.infra.persistence.mapper}。
+ * 不写这一行，启动时会报 "Invalid bound statement (not found)" —— 这个错很难从堆栈看出根因。
  */
 @Configuration
+@MapperScan("com.novel.infra.persistence.mapper")
 public class MybatisPlusConfig {
 
     @Bean

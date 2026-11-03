@@ -1,15 +1,34 @@
 # 本机开发用中间件
-# 只放「Windows 主机上没有」的东西：Elasticsearch、MinIO
-# MySQL / Redis / RabbitMQ 直接连 Windows 主机（WSL 走 mirrored 网络，127.0.0.1 可直达）
+# 主力环境：MySQL / RabbitMQ 连 Windows 主机（WSL 走 mirrored 网络，127.0.0.1 可直达）
+# Redis：优先用主机的 6379；主机没开时用本 compose 的 redis 服务（映射到 6380，避免端口打架）
 #
 # 用法：
 #   docker compose -f deploy/docker-compose.yml up -d
+#   docker compose -f deploy/docker-compose.yml up -d redis   # 只起 Redis 兜底
 #   docker compose -f deploy/docker-compose.yml ps
 #   docker compose -f deploy/docker-compose.yml down          # 停容器，保留数据卷
 #   docker compose -f deploy/docker-compose.yml down -v       # 连数据一起删
 name: novel-dev
 
 services:
+  # Redis 兜底实例。
+  # 为什么不映射 6379：主机上的 Redis 随时可能起来，两边抢同一个端口会启动失败。
+  # 用 6380 后两者可以共存，应用侧改 spring.data.redis.port 即可切换。
+  redis:
+    image: redis:7-alpine
+    container_name: novel-redis
+    command: redis-server --appendonly yes --save 60 1
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   elasticsearch:
     image: elasticsearch:8.13.0
     container_name: novel-es
@@ -57,3 +76,4 @@ services:
 volumes:
   es-data:
   minio-data:
+  redis-data:

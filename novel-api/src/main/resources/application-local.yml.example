@@ -23,6 +23,11 @@ spring:
   #   password: xxx
 
 novel:
+  jwt:
+    # 必须配，至少 32 字节。生成：openssl rand -base64 48
+    # 不配的话应用会在启动时直接失败，并在日志里给出这条提示
+    secret: 在这里填 openssl rand -base64 48 的输出
+
   storage:
     # 想换成自己的 MinIO 账号就改这里
     # access-key: novel

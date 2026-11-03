@@ -111,6 +111,20 @@ novel:
     bucket: ${NOVEL_MINIO_BUCKET:novel}
     region: us-east-1
 
+  jwt:
+    # 密钥不能写死在这里（本文件要提交）。留空时应用会启动失败并提示如何配置，
+    # 这是刻意为之：带着空密钥跑起来比起不来更危险。
+    secret: ${NOVEL_JWT_SECRET:}
+    access-ttl: 30m
+    refresh-ttl: 7d
+    issuer: novel
+
+  auth:
+    rate-limit:
+      # 同一 IP 每分钟最多 5 次登录尝试，超过直接 42900
+      login-max-attempts: 5
+      login-window: 60s
+
 springdoc:
   api-docs:
     enabled: true

@@ -137,7 +137,7 @@ novel/                      聚合 POM（pom.xml）
 
 ### 2.4 包结构
 
-现状（M0）只有一条完整纵向切片：
+现状（M0 骨架 + M1 认证）：
 
 ```
 com.novel.common
@@ -145,38 +145,58 @@ com.novel.common
 └── result/{Result, ResultCode, PageQuery, PageResult}
 
 com.novel.core
-└── storage/{StoragePort, FileService, FileBizType, PresignedUpload}
+├── storage/{StoragePort, FileService, FileBizType, PresignedUpload}
+└── user/
+    ├── domain/{UserAccount, UserProfile, UserStat}
+    ├── port/{UserRepository, TokenPort, RefreshTokenStore, PasswordHasher, LoginAttemptLimiter}
+    └── application/{AuthService, UserService, RegisterCommand, LoginCommand,
+                     ProfileUpdate, AuthView, UserView, UserDetailView}
 
 com.novel.infra
-├── config/{MybatisPlusConfig, RedisConfig, RabbitConfig, StorageConfig}
+├── config/{MybatisPlusConfig, RedisConfig, RabbitConfig, StorageConfig, SecurityInfraConfig}
+├── persistence/{UserRepositoryImpl, entity/*, mapper/*}
+├── security/{JwtTokenAdapter, JwtProperties, BCryptPasswordHasher,
+│             RedisTokenStore, RedisLoginAttemptLimiter, AuthRateLimitProperties}
 ├── storage/{S3StorageAdapter, StorageProperties}
 └── health/DependencyHealthChecker
 
 com.novel.api
-├── NovelApplication                        # @SpringBootApplication(scanBasePackages = "com.novel")
-├── config/{OpenApiConfig, StorageBootstrap}
-├── controller/{FileController, SystemController, dto/PresignRequest}
+├── NovelApplication                        # @SpringBootApplication(scanBasePackages = "com.novel")，排除 UserDetailsServiceAutoConfiguration
+├── config/{OpenApiConfig, StorageBootstrap, SecurityConfig}
+├── controller/{AuthController, UserController, FileController, SystemController, dto/*}
+├── security/{JwtAuthenticationFilter, RestAuthenticationEntryPoint, RestAccessDeniedHandler,
+│             SecurityResponses, LoginUser, SecurityUtils}
 └── web/{TraceIdFilter, ResponseTraceAdvice, GlobalExceptionHandler}
 ```
 
-目标结构（M1 起按业务域横向铺开，每域三层 `application / domain / port`）：`user`、`novel`、`reading`、`review`、`community`、`search`、`rank`。
+**认证的端口倒置**：`TokenPort` / `RefreshTokenStore` / `PasswordHasher` / `LoginAttemptLimiter` 四个接口定义在 core，JJWT、Redis、BCrypt 的实现全部在 infra。core 里没有任何一行代码知道"JWT"这个词。
+
+`JwtAuthenticationFilter` **不带 `@Component`**，由 `SecurityConfig` 手动 new 进过滤器链 —— 标了 `@Component` 会被 Spring Boot 当普通 Servlet Filter 再注册一次，导致每个请求执行两遍。
+
+目标结构（后续里程碑按业务域横向铺开，每域三层 `application / domain / port`）：`novel`、`reading`、`review`、`community`、`search`、`rank`。
 
 ### 2.5 请求链路
 
 ```
 Client
   → TraceIdFilter（traceId 入 MDC + 响应头 X-Trace-Id）
-  → [M1 起] Spring Security JWT 过滤器链
+  → Spring Security 过滤器链
+      ├─ 放行：/api/v1/auth/**、/api/v1/system/**、/swagger-ui/**、/v3/api-docs/**、/actuator/health
+      ├─ JwtAuthenticationFilter：解析 Bearer → SecurityContext(LoginUser)
+      └─ 失败：RestAuthenticationEntryPoint(401) / RestAccessDeniedHandler(403)，响应体与 Result 同构
   → Controller（@Validated 入参校验）
   → ApplicationService（core，业务规则）
       ├─ MySQL        MyBatis-Plus（分页/乐观锁/防全表攻击三插件）
-      ├─ Redis        缓存 / 榜单 ZSET / 计数
+      ├─ Redis        缓存 / 榜单 ZSET / 计数 / refresh 白名单 / 登录限流
       ├─ MinIO        预签名 URL（后端不碰文件流）
       ├─ ES           只读搜索
       └─ Outbox       写库同事务落 outbox 表 → 异步投递 RabbitMQ → 消费者
   → ResponseTraceAdvice（补 traceId 进 Result）
   → GlobalExceptionHandler（兜底）
 ```
+
+放行规则有顺序陷阱：`GET /api/v1/users/*` 会匹配到 `/users/me`，所以 `.requestMatchers(GET, "/api/v1/users/me").authenticated()` 必须写在 `permitAll` 之前。
+
 
 ### 2.6 中间件拓扑（已声明的实际配置）
 
@@ -198,6 +218,15 @@ Client
 > 现状：**拓扑已声明，生产者/消费者尚未实现**（M4 随搜索同步落地）。`outbox`、`mq_consume_log` 两张表已建好，是幂等与自愈的落点。
 
 **Redis**（`RedisConfig`）：`StringRedisTemplate` + 自定义 `RedisTemplate<String,Object>`，key 用 `StringRedisSerializer`，value 用 `GenericJackson2JsonRedisSerializer`（JSON 里带 `@class`）。禁止 JDK 序列化——`redis-cli` 要能直接看懂缓存内容。
+
+已占用的键空间：
+
+| 键 | 类型 | TTL | 用途 |
+|---|---|---|---|
+| `auth:refresh:{jti}` | String → userId | 与 refresh 令牌同寿（7d） | refresh 白名单，登出/轮换即删 |
+| `auth:login:ip:{ip}` | String 计数 | 60s | 登录限流，Lua 保证 INCR+EXPIRE 原子 |
+
+> 本机 6379 的主机 Redis 时常不在线，`deploy/docker-compose.yml` 里提供了 `redis` 兜底服务（映射 **6380**，避开主机端口），需要时 `docker compose up -d redis`，并在 `application-local.yml` 里写 `spring.data.redis.port: 6380`。
 
 **对象存储**（`StorageConfig` → `S3StorageAdapter`）：AWS SDK 走 S3 协议，`pathStyleAccessEnabled(true)`（MinIO 必需），`S3Client` 与 `S3Presigner` 的 endpoint/region/凭证必须完全一致。`StorageBootstrap`（`@Order(100)` 的 `ApplicationRunner`）启动时幂等建 bucket 并设公共读策略，失败只打 warn 不影响启动。
 
@@ -224,28 +253,37 @@ Client
 - 错误码分段：`0` 成功；`4xxxx` 客户端（与 HTTP 对齐）；`5xxxx` 服务端；`1xxxx` 业务按域（1-1 用户 / 1-2 小说 / 1-4 评分评论 / 1-5 社区 / 1-6 搜索）。
 - 分页入参 `page/size`，`size` 硬上限 50（`PageQuery.MAX_SIZE` 与分页插件双保险）；出参 `PageResult{list,total,page,size,hasNext}`。
 - 时间统一 `Asia/Shanghai`，列类型 `DATETIME`（不用 `TIMESTAMP`）。
-- 密码只存 BCrypt 哈希。
+- 密码只存 BCrypt 哈希（strength=10，`$2a$10$` 前缀）。
+- **401/403 有两套出口，但必须是同一份 JSON**：过滤器链上的由 `RestAuthenticationEntryPoint` / `RestAccessDeniedHandler` 直接写响应（此时 `@RestControllerAdvice` 还没介入）；Controller 内 `@PreAuthorize` 拒绝的由 `GlobalExceptionHandler` 处理。两者都输出 `Result{code,message,traceId}`，401 对应 `40100`，403 对应 `40300`。
+- 登录失败一律返回 `10103 用户名或密码错误`，不区分"用户不存在"与"密码错误"。
 
 ### 2.9 配置与环境变量
 
 `application.yml` 可提交；密码只进 `application-local.yml`（已被 `.gitignore` 忽略，仓库只留 `.example`），通过 `spring.config.import: optional:classpath:application-local.yml` 加载。
 
-常用环境变量：`NOVEL_DB_HOST/PORT/NAME/USER/PASSWORD`、`NOVEL_REDIS_HOST/PORT/PASSWORD/DB`、`NOVEL_MQ_HOST/PORT/USER/PASSWORD`、`NOVEL_ES_URI`、`NOVEL_MINIO_ENDPOINT/PUBLIC_ENDPOINT/ACCESS_KEY/SECRET_KEY/BUCKET`、`NOVEL_SERVER_PORT`。
+常用环境变量：`NOVEL_DB_HOST/PORT/NAME/USER/PASSWORD`、`NOVEL_REDIS_HOST/PORT/PASSWORD/DB`、`NOVEL_MQ_HOST/PORT/USER/PASSWORD`、`NOVEL_ES_URI`、`NOVEL_MINIO_ENDPOINT/PUBLIC_ENDPOINT/ACCESS_KEY/SECRET_KEY/BUCKET`、`NOVEL_JWT_SECRET`、`NOVEL_SERVER_PORT`。
+
+`novel.jwt.secret` 是**唯一没有默认值**的配置项：为空或不足 32 字节时 `JwtProperties.validate()` 直接抛 `IllegalStateException`，应用起不来。这是刻意的——带着弱密钥跑起来比起不来危险得多。生成命令：`openssl rand -base64 48`。
+
+其他配置项：`novel.jwt.access-ttl`(30m) / `refresh-ttl`(7d) / `issuer`(novel)、`novel.auth.rate-limit.login-max-attempts`(5) / `login-window`(60s)。
 
 ### 2.10 常用命令
 
 ```bash
-# 中间件（ES / MinIO 走 Docker；MySQL/Redis/MQ 用 Windows 主机上的实例，WSL mirrored 网络直连 127.0.0.1）
+# 中间件（ES / MinIO / Redis 兜底 走 Docker；MySQL、RabbitMQ 用 Windows 主机实例，WSL mirrored 网络直连 127.0.0.1）
 docker compose -f deploy/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml up -d redis   # 只起 Redis（端口 6380）
 
 # 启动
 mvn -pl novel-api -am spring-boot:run
 mvn -DskipTests package && java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar
 
 # 测试
-mvn test                                  # 含 Testcontainers（需 Docker）
+mvn test                                  # 39 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
 mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
+mvn test -Dtest=AuthFlowIntegrationTest   # 认证链路端到端
+mvn test -Dtest=AuthServiceTest           # 认证业务逻辑单元测试
 ```
 
 自检入口：`/swagger-ui.html`、`/api/v1/system/ping`、`/api/v1/system/dependencies`（五项中间件实测）、`/actuator/health`。
@@ -253,7 +291,7 @@ mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
 ### 2.11 里程碑
 
 - [x] **M0 骨架**：四模块工程、Flyway 21 表、统一响应、全局异常、traceId、Swagger、中间件体检、预签名上传闭环
-- [ ] M1 用户与认证（JWT + Spring Security）
+- [x] **M1 用户与认证**：注册/登录/刷新/登出、JWT 双令牌 + Redis 白名单、Spring Security 过滤器链、401/403 统一响应、登录限流、个人资料读写、他人主页免登录
 - [ ] M2 小说/章节/导入/阅读/书架
 - [ ] M3 评分与书评
 - [ ] M4 搜索（ES + IK + Outbox 同步 + 消费者）
