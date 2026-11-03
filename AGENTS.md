@@ -89,9 +89,9 @@
 >   - `TokenPort`（发/验令牌的接口）— core 里只声明"签发一对令牌""验一个令牌"，看不见 JWT 字样，换实现不动业务代码
 >   - `JwtTokenAdapter`（其实现，jjwt）— 密钥不足 32 字节直接启动失败，因为带着弱密钥跑起来比起不来更危险
 >   - `RefreshTokenStore`（refresh 白名单）— 键 `auth:refresh:{jti}`、值 userId，TTL 与令牌同寿，登出/轮换即删
->   - `BCryptPasswordHasher` — strength=10，单次约 60ms，够挡离线爆破又不拖垮登录接口
+>   - `BCryptPasswordHasher` — strength=10，单次 50~100ms，够挡离线爆破又不拖垮登录接口
 >   - `LoginAttemptLimiter` — 键 `auth:login:ip:{ip}`，60 秒 5 次，Lua 保证计数与过期原子
->   - 另有 3 个实体、3 个 Mapper 与 6 个 DTO，都是照 V1 的表结构直译，无特殊处理
+>   - 另有 3 个实体、3 个 Mapper 与 6 个出入参对象，都是照 V1 的表结构直译，无特殊处理
 > - **发送方/接收方**：不涉及（本次无消息链路，`novel.event` 拓扑与 `outbox` 表未动）。
 > - **失败处理**：用户看到的永远是同一份 `{code,message,traceId}` JSON，不会因为错在过滤器还是错在 Controller 而变成 HTML 错误页——过滤器链上的 401/403 由 `RestAuthenticationEntryPoint` / `RestAccessDeniedHandler` 直接写响应，Controller 内被 `@PreAuthorize` 拒绝的走 `GlobalExceptionHandler`。令牌过期、伪造、类型不符统一转 `10105`，不让 `ExpiredJwtException` 冒到 500；登录失败一律 `10103`，且用户不存在时也跑一次 BCrypt，抹平响应时间差，避免被用来枚举账号。
 >
