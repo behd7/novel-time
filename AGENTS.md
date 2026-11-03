@@ -12,6 +12,10 @@
 
 **每一次任务汇报都必须按下面三段式输出**，缺一段视为汇报未完成。汇报跟随最终答复一起给出，不要另起文件、不要只在注释或提交信息里写。
 
+**汇报是给人看的，不是给编译器看的。** 三段里最常写坏的是【实现路径】：把改动清单原样贴出来，类名一个不落，却没有一句"为什么这么做"。合格的汇报是**先用人话讲清思路与取舍，再把类名、队列名、配置项作为证据挂上去**。下面的反例与正例都是本仓库真实发生过的，照着正例的密度写。
+
+> 一处格式差异：对话里的汇报三段标题齐全；写进 commit message 时，只有【任务结论】的标题换成裸结论句（见「汇报即提交」第 2 条）。不要因为写 commit，把对话里的标题也丢了。
+
 ### 【任务结论】
 
 一句话说明完成了什么。要求：
@@ -22,52 +26,93 @@
 
 ### 【实现路径】
 
-拆到**可验证的对象级**。必须覆盖下面四个子项，逐条列：
+**先说人话，再挂证据。** 固定四段，顺序不许调：
 
-- **创建了哪些关键组件**：交换机名与类型、队列名、绑定关系、路由键、配置项、类/接口/方法、数据表与索引、接口路径。名字要写**全名原样**，不要写"相关配置"。
-- **发送方**：在哪个环节（哪个类、哪个方法、落库前还是落库后）、调用什么方法、以什么方式发送（同步/异步）、确认机制（publisher confirm / 事务消息 / Outbox）。
-- **接收方**：在哪里监听（类名 + 注解）、消费哪个队列、消费后做什么（写库/写 ES/更新 ZSET）。
-- **失败处理**：重试策略（次数 + 退避方式）、死信队列名、补偿/回滚、幂等如何保证（靠什么键）。
+1. **整体思路**（3–5 句白话）：这次解决什么问题、为什么选这条路、最关键的一个取舍是什么。**这段里专有名词不超过 3 个**，出现时必须紧跟一句不超过 15 字的中文解释。
+2. **关键组件**：一行一个对象，格式固定为 `` `名字`（**它是什么**）— **为什么这样定** ``。名字只报主干，其余折叠成一句话带过（"另有 3 个 DTO 和 2 个配置类"），不要逐个点名。
+3. **发送方 / 接收方**：先用一句白话讲清数据从哪走到哪，再挂类名 + 方法 + 注解当证据。本次不涉及消息链路时，这两项**合并成一行**写 `发送方/接收方：不涉及（原因）`。
+4. **失败处理**：先说"出错时系统或用户会看到什么"，再给机制参数（重试次数、退避方式、死信队列名、幂等键）。
 
-精度底线（不满足即视为不合格）：
+#### 术语预算（硬指标）
+
+- 每段最多引入 **3 个新术语**；首次出现必须带 ≤15 字解释，写成 `TokenPort`（发/验令牌的接口）这种形式。
+- **单行反引号标识符 ≤ 3 个**，超了就拆行或改成叙述。
+- **禁止标识符瀑布**：连续 3 行以上以反引号开头、且没有"为什么"的列表，直接判不合格。
+- 一次任务真有 30 个类名要交代，也只报主干 5 个，其余折叠成一句——**汇报不是代码目录**。
+
+#### 设计取舍（必写一条）
+
+一句话讲清"为什么不是另一种做法"，格式：`选了 A，没选 B，因为 ——`。确实没有取舍空间时（纯文档、纯格式调整）写 `无取舍：<原因>`，不许留空。
+
+#### 精度底线（不满足即视为不合格）
 
 | 项目 | 必须写到 | 不合格写法 |
 |---|---|---|
-| 组件 | `novel.event`（Topic）、`q.novel.search.sync`、`novel.search.#` | "配置了交换机" |
+| 思路 | 一段话讲清"为什么这么解"，含被否掉的做法 | 开头直接罗列类名 |
+| 组件 | `novel.event`（Topic）、`q.novel.search.sync`、`novel.search.#`，每个都带"为什么" | "配置了交换机" |
 | 发送方 | `CommentService.create()` 落库后调 `RabbitTemplate.convertAndSend()` | "在业务层发送" |
 | 接收方 | `CommentConsumer` 上 `@RabbitListener(queues = ...)` | "消费端处理" |
 | 失败处理 | 3 次指数退避 → `q.novel.dead`，以 `commentId` 幂等 | "做了重试和幂等" |
 
-补充规则：
+#### 补充规则
 
-- **不涉及的子项不许省略，也不许编造**，写 `不涉及：<原因>`。例如只改文档时写"发送方：不涉及（本次无消息链路改动）"。
+- **不涉及的子项不许省略，也不许编造**，写 `不涉及：<原因>`。例如只改文档时写"发送方/接收方：不涉及（本次无消息链路改动）"。
 - 一次任务若涉及多条链路（如评论 + 搜索同步），**每条链路各写一组**，不要合并成一段。
 - 只写**实际存在**的东西。设计好但未实现的一律标注"（设计，未实现）"。
+- 自检判据：**把汇报发给一个不熟悉本项目的人，他能否在 30 秒内说出"这次为什么这么改"**。说不出来就是名词堆砌，重写。
 
 ### 【验证方式】
 
-如何确认接入生效，必须可执行或可观测，至少给出两类：
+如何确认接入生效，必须可执行或可观测，至少给出两类，且**至少一类是人话级的**——打开哪个地址看到什么、手工敲哪条命令得到什么结果。不能通篇是类名与用例数量。
 
-- **命令/接口**：可直接复制的命令（`mvn test -Dtest=...`、`curl ...`）或接口地址。
-- **日志/监控**：要看到什么才算成功，例如控制台出现 `traceId`、`/actuator/health` 中某组件 UP、队列深度为 0。
-- **测试用例**：测试类/方法名，以及它断言了什么。
+- **命令/接口**：可直接复制的命令（`mvn test -Dtest=...`、`curl ...`）或接口地址，并写清"应该看到什么"。
+- **日志/监控**：要看到什么才算成功，例如该 `traceId` 下出现哪两行日志、`/actuator/health` 中某组件 UP、队列深度为 0。
+- **测试用例**：测试类/方法名 + **断言了什么**。只报"39 个用例全绿"不给断言的，不合格。
 
 禁止写法："已验证通过""测试正常"这种没有证据的结论。
 
-### 示例（本项目的精度基准）
+### 反例与正例（本项目的精度基准）
 
-> 本次任务完成了 RabbitMQ 消息队列在评论入库链路的接入：
->
+#### 反例：一次真实被否的汇报（M1 认证）
+
+> - 创建了 core 侧五个端口：`UserRepository`、`TokenPort`（含 `Type{ACCESS,REFRESH}`、`Issued`、`Claims` 三个嵌套类型）、`RefreshTokenStore`、`PasswordHasher`、`LoginAttemptLimiter`；应用服务 `AuthService`（`register` / `login` / `refresh` / `logout`）与 `UserService`。
+> - 创建了 infra 侧适配器：`JwtTokenAdapter`（jjwt 0.12.6，HS 算法按密钥长度自动选择）……统一由 `SecurityInfraConfig` 装配。
+
+**问题**：信息都对，但没有一句解释"为什么要有 `TokenPort`""为什么 refresh 要落 Redis"。读者拿到 38 个类名，仍然不知道这一版的设计意图和取舍。这是**目录**，不是**汇报**。
+
+#### 正例一：同一件事的白话版（认证接入，M1）
+
 > **【实现路径】**
-> - 创建了 `novel.event`（Topic 类型）和 `q.novel.search.sync`，以 `novel.search.#` 为路由键绑定；死信侧新增 `q.novel.dead`，由 `novel.dlx`（Direct）以 `dead` 键投递。
-> - 发送方：评论服务 `CommentService.create()` 在评论落库的同一事务内写入 `outbox` 表（`message_key` 唯一），由 `OutboxRelay` 定时轮询 `status=0` 的记录后调 `RabbitTemplate.convertAndSend()` 异步投递，开启 `publisher-confirm-type: correlated` 确认投递，确认失败则 `retry_count+1` 并推迟 `next_retry_at`。
-> - 接收方：`CommentConsumer` 用 `@RabbitListener(queues = "q.novel.search.sync")` 监听，`acknowledge-mode: manual`，消费后 upsert 检索库并向 broker 手动 ack。
-> - 失败处理：消费异常按 3 次指数退避（1s/2s/4s）重试，仍失败则 `default-requeue-rejected: false` 使其经 `novel.dlx` 进入 `q.novel.dead`，由补偿任务人工/定时重放；消费端先插入 `mq_consume_log(message_key, consumer)`，唯一键冲突即跳过，以此保证幂等。
+>
+> - **整体思路**：认证最容易把技术细节漏进业务代码——`AuthService` 里只要出现 JWT、BCrypt、Redis 这些词，以后换算法就得改业务逻辑，也没法脱离中间件做单测。所以这版只做一件事：把"发令牌""存续期""验密码""限频次"四件事定义成 core 的接口，具体技术全部推到 infra。第二个取舍是 refresh 没做成纯无状态 JWT：纯 JWT 签出去就作废不了，用户点"退出登录"其实退不掉。改成"令牌带编号 + Redis 存白名单"，登出就删白名单，旧令牌立刻失效——代价是每次刷新多一次 Redis 查询，换来的是能真正踢人。
+> - **关键组件**：
+>   - `TokenPort`（发/验令牌的接口）— core 里只声明"签发一对令牌""验一个令牌"，看不见 JWT 字样，换实现不动业务代码
+>   - `JwtTokenAdapter`（其实现，jjwt）— 密钥不足 32 字节直接启动失败，因为带着弱密钥跑起来比起不来更危险
+>   - `RefreshTokenStore`（refresh 白名单）— 键 `auth:refresh:{jti}`、值 userId，TTL 与令牌同寿，登出/轮换即删
+>   - `BCryptPasswordHasher` — strength=10，单次约 60ms，够挡离线爆破又不拖垮登录接口
+>   - `LoginAttemptLimiter` — 键 `auth:login:ip:{ip}`，60 秒 5 次，Lua 保证计数与过期原子
+>   - 另有 3 个实体、3 个 Mapper 与 6 个 DTO，都是照 V1 的表结构直译，无特殊处理
+> - **发送方/接收方**：不涉及（本次无消息链路，`novel.event` 拓扑与 `outbox` 表未动）。
+> - **失败处理**：用户看到的永远是同一份 `{code,message,traceId}` JSON，不会因为错在过滤器还是错在 Controller 而变成 HTML 错误页——过滤器链上的 401/403 由 `RestAuthenticationEntryPoint` / `RestAccessDeniedHandler` 直接写响应，Controller 内被 `@PreAuthorize` 拒绝的走 `GlobalExceptionHandler`。令牌过期、伪造、类型不符统一转 `10105`，不让 `ExpiredJwtException` 冒到 500；登录失败一律 `10103`，且用户不存在时也跑一次 BCrypt，抹平响应时间差，避免被用来枚举账号。
 >
 > **【验证方式】**
-> - 发一条评论后 `curl http://127.0.0.1:15672/api/queues` 可见 `q.novel.search.sync` 入队又归零；
-> - 日志中该 `traceId` 下同时出现 `outbox 已写入` 与 `search sync consumed`，且 `/api/v1/system/dependencies` 中 `rabbitmq.ok=true`；
-> - `mvn test -Dtest=OutboxRelayTest` 断言确认失败的消息 `retry_count` 递增且不重复投递。
+> - 人话级：不带令牌请求 `GET /api/v1/users/me`，应看到 401 且响应体是 `{"code":40100,…}`；带上刚登录拿到的令牌再请求，应看到 200 和自己的昵称。
+> - `mvn test` → 39 个用例全绿；其中 `AuthFlowIntegrationTest` 用 Testcontainers 起 MySQL + Redis 跑完整链路，断言"旧 refresh 重放返回 `10105`"。
+> - Redis 侧 `docker exec novel-redis redis-cli --scan --pattern 'auth:*'` 应看到 `auth:refresh:{jti}` 与 `auth:login:ip:127.0.0.1`。
+
+#### 正例二：小改动的密度（MQ 接入）
+
+> **【实现路径】**
+> - **整体思路**：评论写入和搜索索引必须解耦，否则 ES 一抖动就拖垮发评论。但"落库后直接发 MQ"会丢消息——事务还没提交，broker 就可能是断的。所以先在同一个事务里写一条 `outbox` 记录，再由后台任务投递：事务保证"库里既然有评论，事件就不会丢"。
+> - **关键组件**：`novel.event`（Topic，业务事件入口）绑 `q.novel.search.sync`（索引同步队列，键 `novel.search.#`）；`novel.dlx`（Direct）把坏消息收进 `q.novel.dead`（键 `dead`）。队列名带 `q.novel.` 前缀、路由键带 `novel.` 前缀，是为了在控制台一眼认出本项目的资源。
+> - **发送方**：`CommentService.create()` 在评论落库的同一事务写 `outbox`（`message_key` 唯一），`OutboxRelay` 定时轮询 `status=0` 后调 `RabbitTemplate.convertAndSend()` 异步投递，开启 `publisher-confirm-type: correlated`；确认失败则 `retry_count+1` 并推迟 `next_retry_at`。
+> - **接收方**：`CommentConsumer` 用 `@RabbitListener(queues = "q.novel.search.sync")` 监听，`acknowledge-mode: manual`，消费后 upsert 索引再手动 ack。
+> - **失败处理**：消费异常先按 3 次指数退避（1s/2s/4s）重试，仍失败则靠 `default-requeue-rejected: false` 送进 `q.novel.dead` 留现场，由补偿任务重放，而不是在客户端无限 requeue 把 CPU 打满；消费端先插 `mq_consume_log(message_key, consumer)`，唯一键冲突即跳过，以此幂等。
+>
+> **【验证方式】**
+> - 人话级：发一条评论后打开 `http://127.0.0.1:15672` 的队列页，`q.novel.search.sync` 应出现一条入队随即归零，`q.novel.dead` 应为 0。
+> - 日志：该 `traceId` 下先出现 `outbox 已写入`，再出现 `search sync consumed`。
+> - `mvn test -Dtest=OutboxRelayTest` 断言确认失败的消息 `retry_count` 递增且不会被重复投递。
 
 ### 汇报即提交（强制）
 
