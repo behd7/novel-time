@@ -1,6 +1,7 @@
 package com.novel.infra.health;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import com.novel.infra.search.NovelIndexAdmin;
 import com.novel.infra.storage.StorageProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +38,8 @@ public class DependencyHealthChecker {
     private final ElasticsearchClient elasticsearchClient;
     private final S3Client s3Client;
     private final StorageProperties storageProperties;
+    /** 搜索索引的状态（别名指向哪个物理索引、有多少文档），M4 起成为常规体检项。 */
+    private final NovelIndexAdmin novelIndexAdmin;
 
     public Map<String, Object> check() {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -62,6 +65,10 @@ public class DependencyHealthChecker {
             var info = elasticsearchClient.info();
             return "Elasticsearch " + info.version().number();
         }));
+
+        // 集群通不代表搜索能用：索引没建、别名丢了、IK 没装，都会让搜索返回 10601。
+        // 把它单列一项，比让运维去猜"ES 明明是绿的"要省事得多。
+        result.put("searchIndex", probe(novelIndexAdmin::describe));
 
         result.put("minio", probe(() -> {
             s3Client.headBucket(b -> b.bucket(storageProperties.getBucket()));

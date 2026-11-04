@@ -1,0 +1,21 @@
+# 手动重建索引 profile：跑完 NovelReindexRunner 自动退出
+#
+#   java -jar novel-api.jar --spring.profiles.active=reindex
+#
+# 重建期间应用可以照常提供服务：新数据写进 novel_vN+1，写完才切别名。
+spring:
+  main:
+    web-application-type: none
+  rabbitmq:
+    listener:
+      simple:
+        # 重建进程不消费消息：增量交给常驻服务，重建只负责全量
+        auto-startup: false
+
+novel:
+  outbox:
+    enabled: false
+
+logging:
+  level:
+    com.novel: info

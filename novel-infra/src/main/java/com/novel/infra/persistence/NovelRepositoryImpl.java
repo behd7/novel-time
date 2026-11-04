@@ -90,6 +90,22 @@ public class NovelRepositoryImpl implements NovelRepository {
     }
 
     @Override
+    public Optional<Category> findCategoryById(long id) {
+        return Optional.ofNullable(categoryMapper.selectById(id)).map(this::toDomain);
+    }
+
+    @Override
+    public List<Novel> pageAfterId(long afterId, int limit) {
+        // limit 只来自配置或常量，仍然夹一道：拼进 SQL 的字符串不接受任何外部输入
+        int safeLimit = Math.min(Math.max(limit, 1), 1000);
+        return novelMapper.selectList(Wrappers.<NovelEntity>lambdaQuery()
+                        .gt(NovelEntity::getId, afterId)
+                        .orderByAsc(NovelEntity::getId)
+                        .last("LIMIT " + safeLimit))
+                .stream().map(this::toDomain).toList();
+    }
+
+    @Override
     public long create(NewNovel novel) {
         NovelEntity entity = new NovelEntity();
         entity.setTitle(novel.title());
@@ -116,7 +132,9 @@ public class NovelRepositoryImpl implements NovelRepository {
                 .set(NovelEntity::getWordCount, wordCount)
                 .set(NovelEntity::getChapterCount, chapterCount)
                 .set(NovelEntity::getLatestChapterId, latestChapterId)
-                .set(NovelEntity::getLatestUpdateAt, latestUpdateAt));
+                .set(NovelEntity::getLatestUpdateAt, latestUpdateAt)
+                // 版本号必须和内容一起变，否则"书变了但版本没变"，索引端会把它当成迟到消息丢掉
+                .setSql("version = version + 1"));
     }
 
     @Override
@@ -156,6 +174,8 @@ public class NovelRepositoryImpl implements NovelRepository {
                 e.getViewCount() == null ? 0L : e.getViewCount(),
                 e.getFavoriteCount() == null ? 0 : e.getFavoriteCount(),
                 e.getReviewCount() == null ? 0 : e.getReviewCount(),
+                e.getHotScore(),
+                e.getVersion() == null ? 0L : e.getVersion(),
                 e.getCreatedAt());
     }
 

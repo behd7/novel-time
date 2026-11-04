@@ -2,6 +2,8 @@ package com.novel.core.novel.importing;
 
 import com.novel.common.exception.BizException;
 import com.novel.common.result.ResultCode;
+import com.novel.core.event.NovelChangeType;
+import com.novel.core.event.NovelEventPublisher;
 import com.novel.core.novel.domain.Category;
 import com.novel.core.novel.domain.Novel;
 import com.novel.core.novel.port.ChapterRepository;
@@ -36,6 +38,7 @@ public class NovelImportService {
     private final NovelRepository novelRepository;
     private final ChapterRepository chapterRepository;
     private final NovelCache novelCache;
+    private final NovelEventPublisher eventPublisher;
 
     /**
      * @param parsed         解析结果
@@ -68,6 +71,10 @@ public class NovelImportService {
 
         // 分类页/列表页的缓存里可能还留着旧数据，导入后清一次
         novelCache.evictCategories();
+
+        // 同一个事务里宣告"这本书出现了"。此时统计字段已经写全，版本号也已自增，
+        // 消费端回库读到的就是完整的一本书 —— 顺序不能反。
+        eventPublisher.novelChanged(novelId, NovelChangeType.CREATED);
 
         log.info("导入完成 novelId={} title={} 章节={} 字数={}",
                 novelId, parsed.title(), parsed.chapters().size(), parsed.totalWords());

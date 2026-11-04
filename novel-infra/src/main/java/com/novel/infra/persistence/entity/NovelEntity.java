@@ -34,6 +34,14 @@ public class NovelEntity {
     private Integer favoriteCount;
     private Integer reviewCount;
     private BigDecimal hotScore;
+    /**
+     * 搜索索引同步版本号。
+     *
+     * <p>刻意**不加** {@code @Version}：这个列是给检索引擎丢弃过期消息用的单调序号，
+     * 不是乐观锁。加上注解会让 MyBatis-Plus 的乐观锁插件接管它，
+     * 两种语义混在一起后，"版本冲突"到底该重试还是该丢弃就说不清了。
+     */
+    private Long version;
     @TableLogic
     private Integer deleted;
     private LocalDateTime createdAt;

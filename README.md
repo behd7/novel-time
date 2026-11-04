@@ -51,6 +51,16 @@ docker compose -f deploy/docker-compose.yml ps
 > 主机上的 Redis 若没启动（`6379` 无监听），用 compose 里的兜底实例：`docker compose up -d redis`，
 > 它会映射到 **6380**（避开主机端口），然后在 `application-local.yml` 写 `spring.data.redis.port: 6380`。
 
+ES 是从 `deploy/es/Dockerfile` 构建的（在官方 8.13.0 上装 IK 分词插件）。首次用或换版本时先构建：
+
+```bash
+docker compose -f deploy/docker-compose.yml build elasticsearch
+docker compose -f deploy/docker-compose.yml up -d elasticsearch
+```
+
+> 没装/装不上 IK 时，把 `novel.search.analyzer` 与 `search-analyzer` 配成 `standard` 也能跑，
+> 只是中文会按单字切分。这里不做自动降级——悄悄换分词器比报错更难排查。
+
 ### 建库
 
 ```sql
@@ -93,7 +103,7 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar
 |---|---|
 | http://127.0.0.1:8080/swagger-ui.html | 接口文档 |
 | http://127.0.0.1:8080/api/v1/system/ping | 存活探针 |
-| http://127.0.0.1:8080/api/v1/system/dependencies | **中间件体检**（MySQL/Redis/MQ/ES/MinIO 逐个探测） |
+| http://127.0.0.1:8080/api/v1/system/dependencies | **中间件体检**（MySQL/Redis/MQ/ES/MinIO + 搜索索引状态） |
 | http://127.0.0.1:8080/actuator/health | Actuator 健康检查 |
 
 ## 认证
@@ -181,13 +191,39 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
 - 小说详情**不缓存**：主键查询 1ms，为它维护失效逻辑不划算
 - 阅读数先累加到 `novel:view:delta`（Redis Hash），由 `ViewCountFlushJob` 每 60 秒合并回库
 
+## 搜索
+
+MySQL 是唯一真相，ES 只是可重建的索引副本。写路径只有一个出口：业务事务里落一条 `outbox`，
+后台任务投递并等 broker 确认，消费端回库读最新数据再整篇覆盖索引。
+
+```
+导入/评分 ─(同事务)→ outbox ─(轮询投递, 等确认)→ novel.event → q.novel.search.sync
+                                                                    │ 回查 MySQL
+用户搜索 → SearchController → SearchPort → ES 索引 ←(整篇覆盖, 带版本号)┘
+```
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/api/v1/search?q=青云` | 否 | 书名/作者/简介搜索，返回高亮片段；`categoryId`、`status`、`sort`、分页 |
+| GET | `/api/v1/search/suggest?q=青` | 否 | 书名前缀补全，最多 10 条 |
+
+- 排序：`relevance`（默认）/ `latest` / `hot` / `rating` / `wordCount`
+- 深分页窗口 `page*size ≤ 1000`，超过返回 400：搜索翻到第 20 页以后，代价随页码线性上涨
+- ES 不可用时搜索返回 `10601`，列表/详情/书架不受影响
+
+手动重建索引（写 `novel_v2` → 刷新 → 原子切别名 → 删旧索引，期间搜索不断服）：
+
+```bash
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=reindex
+```
+
 ## 进度
 
 - [x] **M0 骨架**：多模块工程、Flyway 迁移、统一响应、全局异常、traceId、Swagger、中间件体检
 - [x] **M1 用户与认证**：注册/登录/刷新/登出、JWT 双令牌 + Redis 白名单、Spring Security、登录限流、个人资料、他人主页
 - [x] **M2 阅读**：TXT 解析与幂等导入、小说列表/详情、目录、正文 + 缓存、阅读数写缓冲、书架
 - [x] **M3 评分书评**：1-5 星一人一票、平均分增量维护 + 每日对账、书级评论区（最热/最新）、楼中楼、点赞幂等
-- [ ] M4 搜索（ES + IK + Outbox 同步）
+- [x] **M4 搜索**：ES 索引 + 别名 + IK、Outbox 增量同步（投递确认 / 手动 ack / 死信）、高亮与筛选排序、搜索建议、每日全量重建
 - [ ] M5 榜单
 - [ ] M6 社区
 - [ ] M7 工程收尾（压测 / CI / 架构图）

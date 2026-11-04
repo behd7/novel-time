@@ -4,10 +4,21 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.novel.infra.persistence.entity.NovelEntity;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface NovelMapper extends BaseMapper<NovelEntity> {
+
+    /**
+     * 读当前的同步版本号。
+     *
+     * <p>直接写 SQL 而不用 {@code selectById}：这个方法要能读到**已被逻辑删除**的行
+     * （下架时也要发一条带版本号的删除事件），而 MyBatis-Plus 的 {@code @TableLogic}
+     * 会给所有 wrapper 查询自动加上 {@code deleted = 0}。
+     */
+    @Select("SELECT version FROM novel WHERE id = #{id}")
+    Long selectVersion(@Param("id") long id);
 
     /**
      * 原子的自增，而不是"读出来 +1 再写回去"。
@@ -40,7 +51,8 @@ public interface NovelMapper extends BaseMapper<NovelEntity> {
                SET rating_sum = rating_sum + #{sumDelta},
                    rating_count = GREATEST(rating_count + #{countDelta}, 0),
                    avg_rating = CASE WHEN rating_count = 0 THEN 0
-                                     ELSE ROUND(rating_sum / rating_count, 2) END
+                                     ELSE ROUND(rating_sum / rating_count, 2) END,
+                   version    = version + 1
              WHERE id = #{id}
             """)
     int addRating(@Param("id") long id, @Param("sumDelta") long sumDelta, @Param("countDelta") int countDelta);

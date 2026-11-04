@@ -14,6 +14,13 @@ spring:
   lifecycle:
     timeout-per-shutdown-phase: 20s
 
+  # 定时任务线程池。默认只有 1 个线程：一旦凌晨的全量重建占着线程，
+  # 阅读数落库和 Outbox 投递就全被卡住。三个任务各要一个线程。
+  task:
+    scheduling:
+      pool:
+        size: 3
+
   # 本地私密配置覆盖层：文件存在就加载，不存在也不报错。
   # 数据库密码这类东西放 application-local.yml（已被 .gitignore 忽略），永远不要写进本文件。
   config:
@@ -124,6 +131,30 @@ novel:
       # 同一 IP 每分钟最多 5 次登录尝试，超过直接 42900
       login-max-attempts: 5
       login-window: 60s
+
+  search:
+    enabled: true
+    # 读写统一走别名：物理索引是 novel_v1 / novel_v2…，重建时只切别名，调用方无感
+    alias: novel
+    index-prefix: novel
+    # 默认按 IK 分词。官方 ES 镜像不带 IK，没有插件的机器请显式改成 standard，
+    # 不做自动降级 —— 悄悄换分词器比报错更难排查
+    analyzer: ik_max_word
+    search-analyzer: ik_smart
+    bulk-size: 500
+    rebuild-cron: "0 0 2 * * ?"
+    # 消费失败在进程内退避重试，3 个间隔 = 最多 4 次尝试，仍失败进死信
+    retry-delays-ms: 1000,2000,4000
+    # 重建后保留的索引份数（含新的），留一份旧的用于回滚
+    keep-indexes: 2
+
+  outbox:
+    enabled: true
+    poll-interval-ms: 1000
+    batch-size: 100
+    # 2/4/8/16/32 秒退避，第 6 次仍失败就置为"投递失败"留在库里
+    max-attempts: 6
+    confirm-timeout-ms: 3000
 
 springdoc:
   api-docs:

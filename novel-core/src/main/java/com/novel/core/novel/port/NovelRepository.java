@@ -33,6 +33,17 @@ public interface NovelRepository {
 
     Optional<Category> findCategoryByName(String name);
 
+    /** 按 id 取单个分类。搜索索引要把分类名冗余进文档，逐本查一次主键比整表扫一遍便宜。 */
+    Optional<Category> findCategoryById(long id);
+
+    /**
+     * 按 id 游标翻页，供索引全量重建使用。
+     *
+     * <p>为什么不用 {@link #page(NovelQuery)}：重建要遍历全表，而 offset 分页在深页时
+     * 每翻一页都要扫过前面所有行；游标只认"上一批的最大 id"，代价恒定。
+     */
+    List<Novel> pageAfterId(long afterId, int limit);
+
     /** 新建小说，返回自增 id。统计字段此时全为 0。 */
     long create(NewNovel novel);
 

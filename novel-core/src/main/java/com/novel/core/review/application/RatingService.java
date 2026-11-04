@@ -2,6 +2,8 @@ package com.novel.core.review.application;
 
 import com.novel.common.exception.BizException;
 import com.novel.common.result.ResultCode;
+import com.novel.core.event.NovelChangeType;
+import com.novel.core.event.NovelEventPublisher;
 import com.novel.core.novel.domain.Novel;
 import com.novel.core.novel.port.NovelRepository;
 import com.novel.core.review.application.view.RatingSummaryView;
@@ -33,6 +35,7 @@ public class RatingService {
 
     private final RatingRepository ratingRepository;
     private final NovelRepository novelRepository;
+    private final NovelEventPublisher eventPublisher;
 
     public RatingSummaryView summary(long novelId, Long currentUserId) {
         Novel novel = requireNovel(novelId);
@@ -66,10 +69,12 @@ public class RatingService {
                 ratingRepository.save(novelId, userId, score);
                 novelRepository.addRating(novelId, (long) score - old, 0);
             }
+            notifyChanged(novelId);
         } else if (previous.get() != score) {
             ratingRepository.save(novelId, userId, score);
             // 改分只动总分，人数不变
             novelRepository.addRating(novelId, (long) score - previous.get(), 0);
+            notifyChanged(novelId);
         }
         log.info("评分 novelId={} userId={} score={} 原值={}", novelId, userId, score, previous.orElse(null));
         return summary(novelId, userId);
@@ -82,6 +87,7 @@ public class RatingService {
         if (previous.isPresent()) {
             ratingRepository.delete(novelId, userId);
             novelRepository.addRating(novelId, -previous.get(), -1);
+            notifyChanged(novelId);
         }
         return summary(novelId, userId);
     }
@@ -110,6 +116,16 @@ public class RatingService {
     public void recalculate(long novelId) {
         RatingRepository.Aggregate aggregate = ratingRepository.aggregate(novelId);
         novelRepository.setRatingStats(novelId, aggregate.sum(), aggregate.count());
+        // 这里刻意不发事件：对账是每天凌晨对所有书跑一遍的批量动作，
+        // 逐本发消息只会让投递队列在重建前后各多一轮无用功，重建本身已经覆盖了它。
+    }
+
+    /**
+     * 评分只影响索引里的 {@code avgRating / ratingCount}，但这两个字段会出现在搜索结果里，
+     * 落后一天用户就会发现"搜索页 4.5 分、详情页 4.2 分"。所以评分变化也走同一条同步链路。
+     */
+    private void notifyChanged(long novelId) {
+        eventPublisher.novelChanged(novelId, NovelChangeType.UPDATED);
     }
 
     public Map<Integer, Long> distribution(long novelId) {

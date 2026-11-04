@@ -226,7 +226,7 @@ novel/                      聚合 POM（pom.xml）
 
 ### 2.4 包结构
 
-现状（M0 骨架 + M1 认证 + M2 阅读 + M3 评分书评）：
+现状（M0 骨架 + M1 认证 + M2 阅读 + M3 评分书评 + M4 搜索）：
 
 ```
 com.novel.common
@@ -245,6 +245,11 @@ com.novel.core
 │   ├── port/{NovelRepository, ChapterRepository, NovelCache, NovelViewCounter}
 │   ├── application/{NovelService, NovelQuery, NovelSort, view/*}
 │   └── importing/{TxtNovelParser, ParsedNovel, ParsedChapter, NovelImportService}
+├── event/{NovelEventPublisher, NovelChangeType}
+├── search/
+│   ├── domain/{NovelDoc, SearchHit, Highlight, SuggestItem}
+│   ├── port/{NovelSearchPort, SearchUnavailableException}
+│   └── application/{SearchService, SearchQuery, SearchSort, SearchTime, view/*}
 ├── reading/
 │   ├── domain/BookshelfItem
 │   ├── port/BookshelfRepository
@@ -262,6 +267,13 @@ com.novel.infra
 ├── security/{JwtTokenAdapter, JwtProperties, BCryptPasswordHasher,
 │             RedisTokenStore, RedisLoginAttemptLimiter, AuthRateLimitProperties}
 ├── cache/{RedisNovelCache, RedisNovelViewCounter}
+├── event/{OutboxEventPublisher, OutboxRelay, OutboxMessageSender,
+│           RabbitOutboxMessageSender, OutboxMessage, OutboxEntity, OutboxProperties}
+├── search/{EsNovelSearchAdapter, NovelIndexDefinition, NovelIndexAdmin,
+│            NovelIndexBootstrap, NovelIndexRebuildJob, NovelDocAssembler,
+│            SearchProperties, SearchInfraConfig}
+├── mq/{NovelSearchSyncConsumer, NovelSearchSyncHandler, NovelSearchSyncMessage,
+│       ConsumeLogRepository, ConsumeLogEntity}
 ├── job/{ViewCountFlushJob, RatingRecalcJob}
 ├── storage/{S3StorageAdapter, StorageProperties}
 └── health/DependencyHealthChecker
@@ -271,14 +283,18 @@ com.novel.api
 ├── config/{OpenApiConfig, StorageBootstrap, SecurityConfig, SchedulingConfig}
 ├── controller/{AuthController, UserController, NovelController, CategoryController,
 │               BookshelfController, RatingController, ReviewController,
-│               FileController, SystemController, dto/*}
-├── importing/NovelImportRunner             # @Profile("import")，导完 System.exit
+│               SearchController, FileController, SystemController, dto/*}
+├── importing/{NovelImportRunner, NovelReindexRunner}   # @Profile("import" / "reindex")，跑完 System.exit
 ├── security/{JwtAuthenticationFilter, RestAuthenticationEntryPoint, RestAccessDeniedHandler,
 │             SecurityResponses, LoginUser, SecurityUtils}
 └── web/{TraceIdFilter, ResponseTraceAdvice, GlobalExceptionHandler}
 ```
 
 **认证的端口倒置**：`TokenPort` / `RefreshTokenStore` / `PasswordHasher` / `LoginAttemptLimiter` 四个接口定义在 core，JJWT、Redis、BCrypt 的实现全部在 infra。core 里没有任何一行代码知道"JWT"这个词。
+
+**搜索的端口倒置**：`NovelSearchPort`（查/建议/写/删）与 `NovelEventPublisher`（"这本书变了"）定义在 core，
+ES 的 DSL、索引名、别名切换、Outbox 表全在 infra。core 里没有一行知道"Elasticsearch"这个词，
+`SearchUnavailableException` 是唯一的技术失败出口，由应用服务翻译成业务码 `10601`。
 
 `JwtAuthenticationFilter` **不带 `@Component`**，由 `SecurityConfig` 手动 new 进过滤器链 —— 标了 `@Component` 会被 Spring Boot 当普通 Servlet Filter 再注册一次，导致每个请求执行两遍。
 
@@ -324,7 +340,12 @@ Client
 | 消费参数 | `acknowledge-mode: manual`、`prefetch: 20`、`concurrency: 2..8`、`default-requeue-rejected: false` | 失败不无限 requeue，直接进死信 |
 | 生产参数 | `publisher-confirm-type: correlated`、`publisher-returns: true`、`template.mandatory: true` | 配合 Outbox 保证不丢 |
 
-> 现状：**拓扑已声明，生产者/消费者尚未实现**（M4 随搜索同步落地）。`outbox`、`mq_consume_log` 两张表已建好，是幂等与自愈的落点。
+> 现状：**M4 起 `q.novel.search.sync` 已接通**——生产者是 `OutboxRelay`（轮询投递，等 broker 确认），
+> 消费者是 `NovelSearchSyncConsumer`（手动 ack，失败 3 次退避后进 `q.novel.dead`）。
+> `q.novel.rank.agg` / `q.novel.stat.agg` 仍然只有拓扑，留给 M5/M6。
+>
+> 事件类型即路由键：`novel.search.created` / `novel.search.updated` / `novel.search.deleted`，
+> 都落在 `novel.search.#` 下。以后加榜单同步时用 `novel.rank.#` 区分，不必改交换机。
 
 **Redis**（`RedisConfig`）：`StringRedisTemplate` + 自定义 `RedisTemplate<String,Object>`，key 用 `StringRedisSerializer`，value 用 `GenericJackson2JsonRedisSerializer`（JSON 里带 `@class`）。禁止 JDK 序列化——`redis-cli` 要能直接看懂缓存内容。
 
@@ -344,9 +365,22 @@ Client
 
 **对象存储**（`StorageConfig` → `S3StorageAdapter`）：AWS SDK 走 S3 协议，`pathStyleAccessEnabled(true)`（MinIO 必需），`S3Client` 与 `S3Presigner` 的 endpoint/region/凭证必须完全一致。`StorageBootstrap`（`@Order(100)` 的 `ApplicationRunner`）启动时幂等建 bucket 并设公共读策略，失败只打 warn 不影响启动。
 
-**MySQL / Flyway**：迁移脚本在 `novel-api/src/main/resources/db/migration`，`V1__init_schema.sql` + `V2__seed_categories.sql`，共 21 张业务表 + `flyway_schema_history`。MyBatis-Plus 拦截器顺序固定为 **分页 → 乐观锁 → 防全表攻击**，分页 `maxLimit=50`。
+**MySQL / Flyway**：迁移脚本在 `novel-api/src/main/resources/db/migration`，`V1__init_schema.sql` + `V2__seed_categories.sql` + `V3__add_novel_version.sql`，共 21 张业务表 + `flyway_schema_history`。MyBatis-Plus 拦截器顺序固定为 **分页 → 乐观锁 → 防全表攻击**，分页 `maxLimit=50`。
 
-**ES**：目前仅 `DependencyHealthChecker` 探活，索引与查询未实现（M4）。
+**ES**（`SearchProperties` → `EsNovelSearchAdapter`）：
+
+| 资源 | 名称 | 说明 |
+|---|---|---|
+| 别名 | `novel` | 读写都走它，重建时原子切换 |
+| 物理索引 | `novel_v1`、`novel_v2`… | 字段映射建好不能改，换分词器只能重建 |
+| 重建 | 每天 02:00（`novel.search.rebuild-cron`） | 写 `v{N+1}` → 刷新 → 切别名 → 删旧索引（保留 `keep-indexes` 份） |
+| 手动重建 | `--spring.profiles.active=reindex` | 运维动作，不暴露成 HTTP 接口 |
+
+- 文档字段：`title` / `authorName` / `intro`（text，IK）、`titleSuggest`（completion）、`categoryId` / `status` / `wordCount` / `avgRating` / `viewCount` / `hotScore` / `latestUpdateAt`。
+- 写入带**外部版本号**（`novel.version`）：旧消息写进来会被集群以 409 拒绝，这是乱序消费的兜底。
+- 查询用 `multi_match`（`title^3, authorName^2, intro`）而不是 `query_string`，避免用户输入被当成查询语法。
+- 深分页窗口 `page*size ≤ 1000`，超过回 400；不提供游标翻页（接口要返回 total 与页码）。
+- IK 插件烤在 `deploy/es/Dockerfile` 里（官方镜像不带）。没有插件的机器把 `novel.search.analyzer` 配成 `standard`，不自动降级。
 
 ### 2.7 数据模型（21 张表）
 
@@ -359,6 +393,9 @@ Client
 | 社区 | `post`、`post_novel_ref`（正文存 `[[ref:N]]` 占位符 + 结构化引用）、`post_comment` |
 | 榜单 | `novel_rank`（`uk_period_date_novel`） |
 | 基础设施 | `outbox`（`uk_message_key`）、`mq_consume_log`（`uk_msg_consumer`） |
+
+> `novel.version`（V3 新增）是搜索索引的同步版本号，内容每变更一次 +1。它**不是**乐观锁：
+> 实体上刻意没有 `@Version`，两种语义混在一起后"版本冲突该重试还是该丢弃"就说不清了。
 
 > `user_stat` 的三个计数（`bookshelf_count` / `review_count` / `like_received`）**当前由业务代码同步维护**
 > —— 书架增删、书评增删、点赞增减各自加减一次，不依赖 MQ。将来接 `q.novel.stat.agg` 改成事件驱动时，
@@ -388,6 +425,16 @@ Client
 
 其他配置项：`novel.jwt.access-ttl`(30m) / `refresh-ttl`(7d) / `issuer`(novel)、`novel.auth.rate-limit.login-max-attempts`(5) / `login-window`(60s)、`novel.reading.view-flush-interval-ms`(60000)、`novel.import.dir`(deploy/samples)、`novel.review.rating-recalc-cron`(0 30 3 * * ?)。
 
+搜索与投递：`novel.search.enabled`(true) / `alias`(novel) / `index-prefix`(novel) / `analyzer`(ik_max_word) /
+`search-analyzer`(ik_smart) / `bulk-size`(500) / `rebuild-cron`(0 0 2 * * ?) /
+`retry-delays-ms`(1000,2000,4000) / `keep-indexes`(2)；`novel.outbox.enabled`(true) / `poll-interval-ms`(1000) /
+`batch-size`(100) / `max-attempts`(6) / `confirm-timeout-ms`(3000)。
+
+> `spring.task.scheduling.pool.size` 设为 **3**：默认只有 1 个线程，凌晨重建会把阅读数落库和 Outbox 投递一起卡住。
+>
+> `import` profile 关掉 `novel.search.enabled` 与 `novel.outbox.enabled`：导入进程只写库，
+> 不建索引也不投递（短命进程等不到 broker 确认就退出了）。留库里的待投递行由常驻服务补发。
+
 ### 2.10 常用命令
 
 ```bash
@@ -403,8 +450,11 @@ mvn -DskipTests package && java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.j
 java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
   --spring.profiles.active=import --novel.import.dir=deploy/samples
 
+# 手动重建搜索索引（不起 Web；写新索引 → 刷新 → 切别名 → 删旧索引）
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=reindex
+
 # 测试
-mvn test                                  # 77 个用例，含 Testcontainers（需 Docker）
+mvn test                                  # 100 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
 mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
 mvn test -Dtest=AuthFlowIntegrationTest   # 认证链路端到端
@@ -413,6 +463,10 @@ mvn test -Dtest=ReadingFlowIntegrationTest # 导入→列表→正文→书架�
 mvn test -Dtest=TxtNovelParserTest        # TXT 解析器纯单测
 mvn test -Dtest=ReviewFlowIntegrationTest  # 评分/书评/点赞端到端
 mvn test -Dtest=RatingServiceTest          # 评分增量聚合单测
+mvn test -Dtest=SearchFlowIntegrationTest  # 导入→投递→可搜、评分同步、重建切别名
+mvn test -Dtest=OutboxRelayTest            # 投递退避与"放弃"状态流转
+mvn test -Dtest=NovelSearchSyncHandlerTest # 消费幂等/重试/毒消息
+mvn test -Dtest=SearchQueryTest            # 搜索入参边界
 ```
 
 自检入口：`/swagger-ui.html`、`/api/v1/system/ping`、`/api/v1/system/dependencies`（五项中间件实测）、`/actuator/health`。
@@ -423,7 +477,7 @@ mvn test -Dtest=RatingServiceTest          # 评分增量聚合单测
 - [x] **M1 用户与认证**：注册/登录/刷新/登出、JWT 双令牌 + Redis 白名单、Spring Security 过滤器链、401/403 统一响应、登录限流、个人资料读写、他人主页免登录
 - [x] **M2 阅读**：TXT 解析与批量导入（幂等）、小说列表/详情、目录分页、正文 + Redis 缓存、阅读数写缓冲、书架（收藏 + 进度 + 有新章标记）
 - [x] **M3 评分书评**：1-5 星一人一票（增量聚合 + 每日对账自愈）、书级评论区（最热/最新、软删除、越权拦截）、楼中楼两层、点赞幂等
-- [ ] M4 搜索（ES + IK + Outbox 同步 + 消费者）
+- [x] **M4 搜索**：ES 索引 + 别名 + IK、Outbox 增量同步（投递确认 / 手动 ack / 死信）、手写 DSL 查询（高亮 / 筛选 / 五种排序）、搜索建议、每日全量重建（零停机切别名）
 - [ ] M5 榜单
 - [ ] M6 社区
 - [ ] M7 工程收尾（压测 / CI / 架构图）
@@ -439,3 +493,5 @@ mvn test -Dtest=RatingServiceTest          # 评分增量聚合单测
 5. **密码/密钥不进 `application.yml`**：走 `application-local.yml` 或环境变量。
 6. **`size` 上限 50**：新分页接口必须用 `PageQuery`，不得放开限制。
 7. **不要主动拉新的中间件 SDK**：MinIO 走 S3 协议（AWS SDK），ES 客户端版本以 Boot BOM 为准。
+8. **搜索索引写入必须带版本号**：`novel.version` 是唯一的顺序依据，缺了它，迟到的旧消息会把新内容盖回去且没有任何报错。
+9. **索引只当副本**：任何"读自己刚写的数据"都走 MySQL；ES 挂了搜索返回 `10601`，其余接口不受影响。

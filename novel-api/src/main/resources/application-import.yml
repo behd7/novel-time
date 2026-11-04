@@ -6,11 +6,24 @@ spring:
   datasource:
     hikari:
       maximum-pool-size: 4
+  rabbitmq:
+    listener:
+      simple:
+        # 导入进程只写库，不消费消息。它是短命进程，消息处理到一半被 System.exit 收掉，
+        # 只会留下一堆半成品状态，交给常驻服务消费更干净（队列是持久化的，消息不会跑）。
+        auto-startup: false
 
 novel:
   import:
     # 默认读仓库里的样例，可用 --novel.import.dir=... 或 NOVEL_IMPORT_DIR 覆盖
     dir: ${NOVEL_IMPORT_DIR:deploy/samples}
+  search:
+    # 不在导入进程里建索引：ES 没起来时不该让导入多等一次超时
+    enabled: false
+  outbox:
+    # 也不投递：投递确认还没回来 JVM 就退出了，容易留下"发了但状态没改"的行。
+    # 待投递记录留在库里，下次常驻服务启动后会被自动发出去。
+    enabled: false
 
 logging:
   level:

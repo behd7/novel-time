@@ -30,7 +30,13 @@ services:
     restart: unless-stopped
 
   elasticsearch:
-    image: elasticsearch:8.13.0
+    # 从 deploy/es/Dockerfile 构建：在 8.13.0 上烤进 IK 分词插件。
+    # 官方镜像不带 IK，直接建带 ik_max_word 的索引会被拒。
+    # 构建失败（比如局域网拉不到插件）时，可临时把 novel.search.analyzer 改成 standard。
+    build:
+      context: ./es
+      dockerfile: Dockerfile
+    image: novel-es-ik:8.13.0
     container_name: novel-es
     environment:
       - discovery.type=single-node

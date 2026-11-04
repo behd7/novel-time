@@ -2,6 +2,7 @@ package com.novel.core.review.application;
 
 import com.novel.common.exception.BizException;
 import com.novel.common.result.ResultCode;
+import com.novel.core.event.NovelEventPublisher;
 import com.novel.core.novel.domain.Novel;
 import com.novel.core.novel.port.NovelRepository;
 import com.novel.core.review.port.RatingRepository;
@@ -43,15 +44,18 @@ class RatingServiceTest {
     private RatingRepository ratingRepository;
     @Mock
     private NovelRepository novelRepository;
+    @Mock
+    private NovelEventPublisher eventPublisher;
 
     private RatingService ratingService;
 
     private final Novel novel = new Novel(NOVEL_ID, "青云志", "佚名", null, 1L, 0, "简介",
-            900, 5, 10L, LocalDateTime.now(), 0, BigDecimal.ZERO, 0L, 0, 0, LocalDateTime.now());
+            900, 5, 10L, LocalDateTime.now(), 0, BigDecimal.ZERO, 0L, 0, 0,
+            BigDecimal.ZERO, 1L, LocalDateTime.now());
 
     @BeforeEach
     void setUp() {
-        ratingService = new RatingService(ratingRepository, novelRepository);
+        ratingService = new RatingService(ratingRepository, novelRepository, eventPublisher);
     }
 
     @Test
