@@ -41,6 +41,12 @@ public interface UserRepository {
     /** 书评数统计，个人主页要显示。 */
     void addReviewCount(long userId, int delta);
 
+    /** 书架收藏数统计。 */
+    void addBookshelfCount(long userId, int delta);
+
+    /** 收到的赞。 */
+    void addLikeReceived(long userId, int delta);
+
     UserStat findStat(long userId);
 
     /** 只更新非空字段，避免把没传的字段覆盖成 null。 */

@@ -58,7 +58,8 @@ public class ReviewService {
     public PageResult<ReviewView> list(long novelId, ReviewSort sort, int page, int size, Long currentUserId) {
         PageResult<Review> reviews = reviewRepository.pageByNovel(novelId, sort, page, size);
         if (reviews.getList().isEmpty()) {
-            return PageResult.empty(reviews.getPage(), reviews.getSize());
+            // 越界页保留真实总数，否则前端会把"翻过头了"当成"一条评论都没有"
+            return PageResult.of(List.of(), reviews.getTotal(), reviews.getPage(), reviews.getSize());
         }
 
         Map<Long, UserProfile> profiles = loadProfiles(
@@ -115,7 +116,7 @@ public class ReviewService {
 
         PageResult<ReviewReply> replies = reviewRepository.pageReplies(reviewId, page, size);
         if (replies.getList().isEmpty()) {
-            return PageResult.empty(replies.getPage(), replies.getSize());
+            return PageResult.of(List.of(), replies.getTotal(), replies.getPage(), replies.getSize());
         }
 
         // 被回复的那条可能是本页之外的，按 id 单独取一次
@@ -192,18 +193,22 @@ public class ReviewService {
 
     @Transactional
     public void likeReview(long reviewId, long userId, boolean like) {
-        reviewRepository.findById(reviewId)
+        Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new BizException(ResultCode.REVIEW_NOT_FOUND));
-        changeLike(LikeTargetType.REVIEW, reviewId, userId, like,
-                delta -> reviewRepository.addLikeCount(reviewId, delta));
+        changeLike(LikeTargetType.REVIEW, reviewId, userId, like, delta -> {
+            reviewRepository.addLikeCount(reviewId, delta);
+            userRepository.addLikeReceived(review.userId(), delta);
+        });
     }
 
     @Transactional
     public void likeReply(long replyId, long userId, boolean like) {
-        reviewRepository.findReplyById(replyId)
+        ReviewReply reply = reviewRepository.findReplyById(replyId)
                 .orElseThrow(() -> new BizException(ResultCode.REVIEW_NOT_FOUND));
-        changeLike(LikeTargetType.REPLY, replyId, userId, like,
-                delta -> reviewRepository.addReplyLikeCount(replyId, delta));
+        changeLike(LikeTargetType.REPLY, replyId, userId, like, delta -> {
+            reviewRepository.addReplyLikeCount(replyId, delta);
+            userRepository.addLikeReceived(reply.userId(), delta);
+        });
     }
 
     /**

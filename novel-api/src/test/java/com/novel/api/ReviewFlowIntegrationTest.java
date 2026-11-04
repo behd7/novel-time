@@ -281,6 +281,82 @@ class ReviewFlowIntegrationTest {
         assertThat(findById(asAnonymous, reviewId).path("liked").asBoolean()).isFalse();
     }
 
+    @Test
+    @DisplayName("非法 sort 属于协议错误：返回 400，而不是 200 + 业务码")
+    void invalidSort_returns400() throws Exception {
+        long id = newNovel();
+        mockMvc.perform(get("/api/v1/novels/" + id + "/reviews").param("sort", "nonsense"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("越界分页保留真实 total，不能抹成 0")
+    void reviews_outOfRangePageKeepsTotal() throws Exception {
+        long id = newNovel();
+        String token = register("pageUser");
+        postJson("/api/v1/novels/" + id + "/reviews", token, """
+                {"content":"唯一一条"}""", 201);
+
+        JsonNode data = readJson(mockMvc.perform(get("/api/v1/novels/" + id + "/reviews")
+                .param("page", "99")).andReturn()).path("data");
+
+        assertThat(data.path("list").size()).isZero();
+        assertThat(data.path("total").asInt()).isEqualTo(1);
+        assertThat(data.path("hasNext").asBoolean()).isFalse();
+    }
+
+    @Test
+    @DisplayName("被点赞的人 user_stat.like_received 会增长")
+    void like_updatesAuthorStat() throws Exception {
+        long id = newNovel();
+        String author = register("likeStatAuthor");
+        String fan = register("likeStatFan");
+
+        long reviewId = postJson("/api/v1/novels/" + id + "/reviews", author, """
+                {"content":"给我点赞"}""", 201).path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/v1/reviews/" + reviewId + "/like")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + fan)).andExpect(status().isOk());
+
+        long authorId = readJson(mockMvc.perform(get("/api/v1/users/me")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + author))
+                .andReturn()).path("data").path("id").asLong();
+        JsonNode detail = readJson(mockMvc.perform(get("/api/v1/users/" + authorId))
+                .andReturn()).path("data");
+
+        assertThat(detail.path("stat").path("likeReceived").asInt()).isEqualTo(1);
+        assertThat(detail.path("stat").path("reviewCount").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("并发首次打分：12 次全部成功，不出现 500")
+    void rating_concurrentFirstTime_noServerError() throws Exception {
+        long id = newNovel();
+        int threads = 2;
+        int rounds = 6;
+        java.util.concurrent.ExecutorService pool =
+                java.util.concurrent.Executors.newFixedThreadPool(threads);
+        java.util.List<java.util.concurrent.Future<Integer>> futures = new java.util.ArrayList<>();
+
+        for (int round = 0; round < rounds; round++) {
+            String token = register("conc" + round);
+            for (int t = 0; t < threads; t++) {
+                futures.add(pool.submit(() -> mockMvc.perform(
+                                put("/api/v1/novels/" + id + "/rating")
+                                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content("{\"score\":5}"))
+                        .andReturn().getResponse().getStatus()));
+            }
+        }
+        pool.shutdown();
+        assertThat(pool.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+        for (java.util.concurrent.Future<Integer> future : futures) {
+            assertThat(future.get()).isEqualTo(200);
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private JsonNode findById(JsonNode list, long id) {

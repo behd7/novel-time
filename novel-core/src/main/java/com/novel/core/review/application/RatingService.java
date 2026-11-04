@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
@@ -43,8 +44,13 @@ public class RatingService {
 
     /**
      * 打分。同一用户第二次调用是**改分**，不会重复计入人数。
+     *
+     * <p>隔离级别显式降到 READ COMMITTED 是为了并发首评：
+     * 默认的 REPEATABLE READ 下，事务第一次查询就固定了快照，
+     * 撞唯一键之后重新查也**看不见**对方刚提交的那行，会再插一次、再撞一次、最后 500。
+     * READ COMMITTED 每条语句取新快照，兜底重读才能看到真实数据。
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public RatingSummaryView rate(long novelId, long userId, int score) {
         validateScore(score);
         requireNovel(novelId);

@@ -278,6 +278,24 @@ class AuthFlowIntegrationTest {
         assertThat(body.path("data").path("bio").asText()).isEqualTo("只看完结");
     }
 
+    @Test
+    @DisplayName("PUT /users/me 传空对象：不报 500，也不改任何字段")
+    void updateProfile_emptyBody_isNoop() throws Exception {
+        JsonNode registered = register("alice11");
+        String access = registered.path("data").path("accessToken").asText();
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .put("/api/v1/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + access)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk());
+
+        JsonNode me = readJson(mockMvc.perform(get("/api/v1/users/me")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + access)).andReturn());
+        assertThat(me.path("data").path("nickname").asText()).isEqualTo("昵称alice11");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private String registerPayload(String username) {

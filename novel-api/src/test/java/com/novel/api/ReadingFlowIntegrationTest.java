@@ -260,6 +260,35 @@ class ReadingFlowIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("加入/移出书架会同步 user_stat.bookshelf_count")
+    void bookshelf_updatesUserStat() throws Exception {
+        long novelId = sampleNovelId();
+        String token = registerAndLogin("statReader");
+
+        long userId = readJson(mockMvc.perform(get("/api/v1/users/me")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andReturn()).path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/v1/bookshelf")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"novelId\":" + novelId + "}"))
+                .andExpect(status().isOk());
+        assertThat(bookshelfCountOf(userId)).isEqualTo(1);
+
+        mockMvc.perform(delete("/api/v1/bookshelf/" + novelId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk());
+        assertThat(bookshelfCountOf(userId)).isZero();
+    }
+
+    private int bookshelfCountOf(long userId) throws Exception {
+        JsonNode detail = readJson(mockMvc.perform(get("/api/v1/users/" + userId))
+                .andReturn()).path("data");
+        return detail.path("stat").path("bookshelfCount").asInt();
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private JsonNode bookshelf(String token) throws Exception {

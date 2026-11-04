@@ -11,4 +11,10 @@ public interface UserStatMapper extends BaseMapper<UserStatEntity> {
 
     @Update("UPDATE user_stat SET review_count = GREATEST(review_count + #{delta}, 0) WHERE user_id = #{userId}")
     int addReviewCount(@Param("userId") long userId, @Param("delta") int delta);
+
+    @Update("UPDATE user_stat SET bookshelf_count = GREATEST(bookshelf_count + #{delta}, 0) WHERE user_id = #{userId}")
+    int addBookshelfCount(@Param("userId") long userId, @Param("delta") int delta);
+
+    @Update("UPDATE user_stat SET like_received = GREATEST(like_received + #{delta}, 0) WHERE user_id = #{userId}")
+    int addLikeReceived(@Param("userId") long userId, @Param("delta") int delta);
 }

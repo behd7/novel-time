@@ -1,8 +1,5 @@
 package com.novel.core.review.application;
 
-import com.novel.common.exception.BizException;
-import com.novel.common.result.ResultCode;
-
 /**
  * 书评列表排序。
  *
@@ -23,6 +20,6 @@ public enum ReviewSort {
                 return sort;
             }
         }
-        throw new BizException(ResultCode.BAD_REQUEST, "不支持的排序方式: " + value);
+        throw new IllegalArgumentException("不支持的排序方式: " + value);
     }
 }

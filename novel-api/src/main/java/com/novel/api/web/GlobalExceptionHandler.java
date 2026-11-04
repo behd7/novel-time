@@ -70,6 +70,11 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Result<Void> handleBadRequest(Exception e) {
         log.warn("请求参数解析失败: {}", e.getMessage());
+        // IllegalArgumentException 是我们自己抛的（例如"不支持的排序方式"），把它的话原样带回去；
+        // 其余框架异常不暴露细节，避免把内部类名/字段名透给前端。
+        if (e instanceof IllegalArgumentException && e.getMessage() != null) {
+            return Result.fail(ResultCode.BAD_REQUEST, e.getMessage());
+        }
         return Result.fail(ResultCode.BAD_REQUEST);
     }
 

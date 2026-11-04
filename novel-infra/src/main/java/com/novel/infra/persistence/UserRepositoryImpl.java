@@ -103,6 +103,16 @@ public class UserRepositoryImpl implements UserRepository {
     }
 
     @Override
+    public void addBookshelfCount(long userId, int delta) {
+        userStatMapper.addBookshelfCount(userId, delta);
+    }
+
+    @Override
+    public void addLikeReceived(long userId, int delta) {
+        userStatMapper.addLikeReceived(userId, delta);
+    }
+
+    @Override
     public UserStat findStat(long userId) {
         UserStatEntity entity = userStatMapper.selectById(userId);
         if (entity == null) {
@@ -117,6 +127,13 @@ public class UserRepositoryImpl implements UserRepository {
 
     @Override
     public void updateProfile(long userId, UserProfile profile) {
+        // 所有字段都是 null 时，MyBatis-Plus 会拼出没有 SET 子句的
+        // "UPDATE user_profile WHERE user_id=?"，直接抛异常变 500。
+        // 语义上"什么都没传"就是"什么都不改"，这里直接返回。
+        if (profile.nickname() == null && profile.avatarKey() == null && profile.bio() == null
+                && profile.gender() == null && profile.birthday() == null) {
+            return;
+        }
         UserProfileEntity entity = new UserProfileEntity();
         entity.setUserId(userId);
         entity.setNickname(profile.nickname());

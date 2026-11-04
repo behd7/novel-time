@@ -9,6 +9,7 @@ import com.novel.core.novel.port.NovelRepository;
 import com.novel.core.reading.application.view.BookshelfView;
 import com.novel.core.reading.domain.BookshelfItem;
 import com.novel.core.reading.port.BookshelfRepository;
+import com.novel.core.user.port.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,7 @@ public class BookshelfService {
     private final BookshelfRepository bookshelfRepository;
     private final NovelRepository novelRepository;
     private final ChapterRepository chapterRepository;
+    private final UserRepository userRepository;
 
     @Transactional
     public void add(long userId, long novelId) {
@@ -44,6 +46,8 @@ public class BookshelfService {
         }
         bookshelfRepository.save(userId, novelId);
         novelRepository.addFavoriteCount(novel.id(), 1);
+        // 个人主页要显示"书架里有几本"，和 review_count 一样直接维护
+        userRepository.addBookshelfCount(userId, 1);
         log.info("加入书架 userId={} novelId={}", userId, novelId);
     }
 
@@ -54,12 +58,14 @@ public class BookshelfService {
         }
         bookshelfRepository.delete(userId, novelId);
         novelRepository.addFavoriteCount(novelId, -1);
+        userRepository.addBookshelfCount(userId, -1);
     }
 
     public PageResult<BookshelfView> list(long userId, int page, int size) {
         PageResult<BookshelfItem> items = bookshelfRepository.page(userId, page, size);
         if (items.getList().isEmpty()) {
-            return PageResult.empty(items.getPage(), items.getSize());
+            // 越界页也要带上真实总数：返回 total=0 会让前端误判成"书架空了"
+            return PageResult.of(List.of(), items.getTotal(), items.getPage(), items.getSize());
         }
 
         // 一次批量取小说，避免每本书都单独查一次

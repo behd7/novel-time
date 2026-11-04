@@ -1,8 +1,5 @@
 package com.novel.core.novel.application;
 
-import com.novel.common.exception.BizException;
-import com.novel.common.result.ResultCode;
-
 /**
  * 小说列表的排序方式。
  *
@@ -33,6 +30,8 @@ public enum NovelSort {
                 return sort;
             }
         }
-        throw new BizException(ResultCode.BAD_REQUEST, "不支持的排序方式: " + value);
+        // 抛 IllegalArgumentException 而不是业务异常：取值不合法属于协议错误，
+        // 全局处理器会把业务异常映射成 HTTP 200 + 业务码，那样按状态码分支的客户端会当成成功。
+        throw new IllegalArgumentException("不支持的排序方式: " + value);
     }
 }

@@ -360,6 +360,10 @@ Client
 | 榜单 | `novel_rank`（`uk_period_date_novel`） |
 | 基础设施 | `outbox`（`uk_message_key`）、`mq_consume_log`（`uk_msg_consumer`） |
 
+> `user_stat` 的三个计数（`bookshelf_count` / `review_count` / `like_received`）**当前由业务代码同步维护**
+> —— 书架增删、书评增删、点赞增减各自加减一次，不依赖 MQ。将来接 `q.novel.stat.agg` 改成事件驱动时，
+> 必须把这几处直接写库的调用一并去掉，否则会双写。
+
 ### 2.8 响应与错误码契约
 
 - 统一响应 `Result<T>{code, message, data, traceId, success}`，`code=0` 成功；`success` 由 `isSuccess()` 序列化而来，与 `code==0` 等价。
@@ -370,6 +374,9 @@ Client
 - 密码只存 BCrypt 哈希（strength=10，`$2a$10$` 前缀）。
 - **401/403 有两套出口，但必须是同一份 JSON**：过滤器链上的由 `RestAuthenticationEntryPoint` / `RestAccessDeniedHandler` 直接写响应（此时 `@RestControllerAdvice` 还没介入）；Controller 内 `@PreAuthorize` 拒绝的由 `GlobalExceptionHandler` 处理。两者都输出 `Result{code,message,traceId}`，401 对应 `40100`，403 对应 `40300`。
 - 登录失败一律返回 `10103 用户名或密码错误`，不区分"用户不存在"与"密码错误"。
+- **区分两种"错"**：请求合法但业务不允许（重名、无权限、已赞过）→ `BizException` → 200 + 业务码；
+  取值本身不合法（`sort=nonsense`、评分 0 星）→ `IllegalArgumentException` → 400。
+  判据是"同样的请求重试一次会不会变好"：不会变好的是协议错误，该 4xx。
 
 ### 2.9 配置与环境变量
 
@@ -397,7 +404,7 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
   --spring.profiles.active=import --novel.import.dir=deploy/samples
 
 # 测试
-mvn test                                  # 71 个用例，含 Testcontainers（需 Docker）
+mvn test                                  # 77 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
 mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
 mvn test -Dtest=AuthFlowIntegrationTest   # 认证链路端到端
