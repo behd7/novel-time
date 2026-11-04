@@ -47,6 +47,17 @@ public interface NovelRepository {
     void addFavoriteCount(long novelId, int delta);
 
     /**
+     * 原子地调整评分聚合值。
+     *
+     * @param sumDelta   总分增量（改分时是"新分 - 旧分"，可能是负数）
+     * @param countDelta 人数增量（首次评分 +1，改分 0，取消 -1）
+     */
+    void addRating(long novelId, long sumDelta, int countDelta);
+
+    /** 对账用：用明细重算出来的值直接覆盖。 */
+    void setRatingStats(long novelId, long sum, int count);
+
+    /**
      * 新建小说用的入参。
      *
      * <p>不复用 {@link Novel} 是因为它有一半字段是 id、统计、时间戳，

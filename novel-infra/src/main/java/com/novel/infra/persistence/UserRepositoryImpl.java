@@ -14,6 +14,8 @@ import com.novel.infra.persistence.mapper.UserStatMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -82,8 +84,22 @@ public class UserRepositoryImpl implements UserRepository {
         if (entity == null) {
             return new UserProfile(userId, DEFAULT_NICKNAME, null, null, 0, null);
         }
-        return new UserProfile(entity.getUserId(), entity.getNickname(), entity.getAvatarKey(),
-                entity.getBio(), entity.getGender(), entity.getBirthday());
+        return toProfile(entity);
+    }
+
+    @Override
+    public List<UserProfile> findProfiles(Collection<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return List.of();
+        }
+        return userProfileMapper.selectBatchIds(userIds).stream()
+                .map(this::toProfile)
+                .toList();
+    }
+
+    @Override
+    public void addReviewCount(long userId, int delta) {
+        userStatMapper.addReviewCount(userId, delta);
     }
 
     @Override
@@ -110,6 +126,11 @@ public class UserRepositoryImpl implements UserRepository {
         entity.setBirthday(profile.birthday());
         // updateById 默认只更新非 null 字段，未传的字段保持原值
         userProfileMapper.updateById(entity);
+    }
+
+    private UserProfile toProfile(UserProfileEntity entity) {
+        return new UserProfile(entity.getUserId(), entity.getNickname(), entity.getAvatarKey(),
+                entity.getBio(), entity.getGender(), entity.getBirthday());
     }
 
     private UserAccount toAccount(UserEntity entity) {

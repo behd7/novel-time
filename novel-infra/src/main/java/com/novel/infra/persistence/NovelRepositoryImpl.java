@@ -131,6 +131,19 @@ public class NovelRepositoryImpl implements NovelRepository {
         novelMapper.addFavoriteCount(novelId, delta);
     }
 
+    @Override
+    public void addRating(long novelId, long sumDelta, int countDelta) {
+        if (sumDelta == 0 && countDelta == 0) {
+            return;
+        }
+        novelMapper.addRating(novelId, sumDelta, countDelta);
+    }
+
+    @Override
+    public void setRatingStats(long novelId, long sum, int count) {
+        novelMapper.setRatingStats(novelId, sum, count);
+    }
+
     private Novel toDomain(NovelEntity e) {
         return new Novel(e.getId(), e.getTitle(), e.getAuthorName(), e.getCoverKey(), e.getCategoryId(),
                 e.getStatus() == null ? Novel.STATUS_ONGOING : e.getStatus(),

@@ -4,6 +4,7 @@ import com.novel.core.user.domain.UserAccount;
 import com.novel.core.user.domain.UserProfile;
 import com.novel.core.user.domain.UserStat;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -33,6 +34,12 @@ public interface UserRepository {
     void initializeUser(long userId, String nickname);
 
     UserProfile findProfile(long userId);
+
+    /** 批量取资料，书评列表要显示作者昵称，逐条查就是 N+1。 */
+    List<UserProfile> findProfiles(java.util.Collection<Long> userIds);
+
+    /** 书评数统计，个人主页要显示。 */
+    void addReviewCount(long userId, int delta);
 
     UserStat findStat(long userId);
 

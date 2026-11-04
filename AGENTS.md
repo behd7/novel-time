@@ -226,7 +226,7 @@ novel/                      聚合 POM（pom.xml）
 
 ### 2.4 包结构
 
-现状（M0 骨架 + M1 认证 + M2 阅读）：
+现状（M0 骨架 + M1 认证 + M2 阅读 + M3 评分书评）：
 
 ```
 com.novel.common
@@ -245,19 +245,24 @@ com.novel.core
 │   ├── port/{NovelRepository, ChapterRepository, NovelCache, NovelViewCounter}
 │   ├── application/{NovelService, NovelQuery, NovelSort, view/*}
 │   └── importing/{TxtNovelParser, ParsedNovel, ParsedChapter, NovelImportService}
-└── reading/
-    ├── domain/BookshelfItem
-    ├── port/BookshelfRepository
-    └── application/{BookshelfService, view/BookshelfView}
+├── reading/
+│   ├── domain/BookshelfItem
+│   ├── port/BookshelfRepository
+│   └── application/{BookshelfService, view/BookshelfView}
+└── review/
+    ├── domain/{Review, ReviewReply, LikeTargetType}
+    ├── port/{RatingRepository, ReviewRepository, LikeRepository}
+    └── application/{RatingService, ReviewService, ReviewSort, view/*}
 
 com.novel.infra
 ├── config/{MybatisPlusConfig, RedisConfig, RabbitConfig, StorageConfig, SecurityInfraConfig}
 ├── persistence/{UserRepositoryImpl, NovelRepositoryImpl, ChapterRepositoryImpl,
-│                BookshelfRepositoryImpl, entity/*, mapper/*}
+│                BookshelfRepositoryImpl, RatingRepositoryImpl, ReviewRepositoryImpl,
+│                LikeRepositoryImpl, entity/*, mapper/*}
 ├── security/{JwtTokenAdapter, JwtProperties, BCryptPasswordHasher,
 │             RedisTokenStore, RedisLoginAttemptLimiter, AuthRateLimitProperties}
 ├── cache/{RedisNovelCache, RedisNovelViewCounter}
-├── job/ViewCountFlushJob
+├── job/{ViewCountFlushJob, RatingRecalcJob}
 ├── storage/{S3StorageAdapter, StorageProperties}
 └── health/DependencyHealthChecker
 
@@ -265,7 +270,8 @@ com.novel.api
 ├── NovelApplication                        # @SpringBootApplication(scanBasePackages = "com.novel")，排除 UserDetailsServiceAutoConfiguration
 ├── config/{OpenApiConfig, StorageBootstrap, SecurityConfig, SchedulingConfig}
 ├── controller/{AuthController, UserController, NovelController, CategoryController,
-│               BookshelfController, FileController, SystemController, dto/*}
+│               BookshelfController, RatingController, ReviewController,
+│               FileController, SystemController, dto/*}
 ├── importing/NovelImportRunner             # @Profile("import")，导完 System.exit
 ├── security/{JwtAuthenticationFilter, RestAuthenticationEntryPoint, RestAccessDeniedHandler,
 │             SecurityResponses, LoginUser, SecurityUtils}
@@ -373,7 +379,7 @@ Client
 
 `novel.jwt.secret` 是**唯一没有默认值**的配置项：为空或不足 32 字节时 `JwtProperties.validate()` 直接抛 `IllegalStateException`，应用起不来。这是刻意的——带着弱密钥跑起来比起不来危险得多。生成命令：`openssl rand -base64 48`。
 
-其他配置项：`novel.jwt.access-ttl`(30m) / `refresh-ttl`(7d) / `issuer`(novel)、`novel.auth.rate-limit.login-max-attempts`(5) / `login-window`(60s)、`novel.reading.view-flush-interval-ms`(60000)、`novel.import.dir`(deploy/samples)。
+其他配置项：`novel.jwt.access-ttl`(30m) / `refresh-ttl`(7d) / `issuer`(novel)、`novel.auth.rate-limit.login-max-attempts`(5) / `login-window`(60s)、`novel.reading.view-flush-interval-ms`(60000)、`novel.import.dir`(deploy/samples)、`novel.review.rating-recalc-cron`(0 30 3 * * ?)。
 
 ### 2.10 常用命令
 
@@ -391,13 +397,15 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
   --spring.profiles.active=import --novel.import.dir=deploy/samples
 
 # 测试
-mvn test                                  # 55 个用例，含 Testcontainers（需 Docker）
+mvn test                                  # 71 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
 mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
 mvn test -Dtest=AuthFlowIntegrationTest   # 认证链路端到端
 mvn test -Dtest=AuthServiceTest           # 认证业务逻辑单元测试
 mvn test -Dtest=ReadingFlowIntegrationTest # 导入→列表→正文→书架端到端
 mvn test -Dtest=TxtNovelParserTest        # TXT 解析器纯单测
+mvn test -Dtest=ReviewFlowIntegrationTest  # 评分/书评/点赞端到端
+mvn test -Dtest=RatingServiceTest          # 评分增量聚合单测
 ```
 
 自检入口：`/swagger-ui.html`、`/api/v1/system/ping`、`/api/v1/system/dependencies`（五项中间件实测）、`/actuator/health`。
@@ -407,7 +415,7 @@ mvn test -Dtest=TxtNovelParserTest        # TXT 解析器纯单测
 - [x] **M0 骨架**：四模块工程、Flyway 21 表、统一响应、全局异常、traceId、Swagger、中间件体检、预签名上传闭环
 - [x] **M1 用户与认证**：注册/登录/刷新/登出、JWT 双令牌 + Redis 白名单、Spring Security 过滤器链、401/403 统一响应、登录限流、个人资料读写、他人主页免登录
 - [x] **M2 阅读**：TXT 解析与批量导入（幂等）、小说列表/详情、目录分页、正文 + Redis 缓存、阅读数写缓冲、书架（收藏 + 进度 + 有新章标记）
-- [ ] M3 评分与书评
+- [x] **M3 评分书评**：1-5 星一人一票（增量聚合 + 每日对账自愈）、书级评论区（最热/最新、软删除、越权拦截）、楼中楼两层、点赞幂等
 - [ ] M4 搜索（ES + IK + Outbox 同步 + 消费者）
 - [ ] M5 榜单
 - [ ] M6 社区

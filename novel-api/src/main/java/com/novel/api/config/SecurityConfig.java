@@ -66,6 +66,8 @@ public class SecurityConfig {
                         .requestMatchers(PUBLIC_PATHS).permitAll()
                         // 阅读入口免登录：列表、详情、目录、正文、分类
                         .requestMatchers(HttpMethod.GET, "/api/v1/novels/**", "/api/v1/categories").permitAll()
+                        // 书评的楼中楼是独立路径，不能靠 /novels/** 覆盖
+                        .requestMatchers(HttpMethod.GET, "/api/v1/reviews/*/replies").permitAll()
                         // 顺序要点：更精确的 /users/me 必须排在 /users/* 前面
                         .requestMatchers(HttpMethod.GET, "/api/v1/users/me").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/users/*").permitAll()

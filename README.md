@@ -122,12 +122,14 @@ curl http://127.0.0.1:8080/api/v1/users/me -H "Authorization: Bearer $ACCESS_TOK
 ### 测试
 
 ```bash
-mvn test                                    # 55 个用例（含 Testcontainers，需要 Docker）
+mvn test                                    # 71 个用例（含 Testcontainers，需要 Docker）
 mvn test -Dtest=ArchitectureTest            # 只跑架构约束
 mvn test -Dtest=AuthFlowIntegrationTest     # 认证链路端到端（起 MySQL + Redis 容器）
 mvn test -Dtest=AuthServiceTest             # 认证业务逻辑单元测试（纯 Mock，1 秒内跑完）
 mvn test -Dtest=ReadingFlowIntegrationTest  # 导入→列表→正文→书架端到端
 mvn test -Dtest=TxtNovelParserTest          # TXT 解析器纯单测
+mvn test -Dtest=ReviewFlowIntegrationTest   # 评分/书评/点赞端到端
+mvn test -Dtest=RatingServiceTest           # 评分增量聚合单测
 ```
 
 ## 阅读
@@ -143,6 +145,24 @@ mvn test -Dtest=TxtNovelParserTest          # TXT 解析器纯单测
 | POST | `/api/v1/bookshelf` | 是 | 加入书架（幂等） |
 | DELETE | `/api/v1/bookshelf/{novelId}` | 是 | 移出书架（物理删除，可再次加入） |
 | PUT | `/api/v1/bookshelf/{novelId}/progress` | 是 | 更新进度 `{"seq": 3}` |
+
+## 评分与书评
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/api/v1/novels/{id}/rating` | 否 | 平均分、人数、我的评分、星级分布 |
+| PUT | `/api/v1/novels/{id}/rating` | 是 | 打分或改分（改分不增加人数） |
+| DELETE | `/api/v1/novels/{id}/rating` | 是 | 取消评分，幂等 |
+| GET | `/api/v1/novels/{id}/reviews` | 否 | 书评列表，`sort=hot\|latest` |
+| POST | `/api/v1/novels/{id}/reviews` | 是 | 发书评，带 `score` 会同时记入评分 |
+| DELETE | `/api/v1/reviews/{id}` | 是 | 只删自己的（软删除） |
+| GET | `/api/v1/reviews/{id}/replies` | 否 | 楼中楼，带 `parentNickname` |
+| POST | `/api/v1/reviews/{id}/replies` | 是 | 回复，带 `parentReplyId` 即楼中楼 |
+| POST/DELETE | `/api/v1/reviews/{id}/like` | 是 | 点赞/取消，幂等 |
+| POST/DELETE | `/api/v1/replies/{id}/like` | 是 | 回复点赞/取消 |
+
+评分用"明细 + 冗余聚合"：`novel_rating` 存每人一票，`novel` 上冗余 `rating_sum/rating_count/avg_rating`，
+打分时只做一次加减，从不 `AVG()` 全表扫。每天凌晨 `RatingRecalcJob` 从明细重算一遍，把漂移的聚合值拉回来。
 
 ### 导入小说
 
@@ -166,7 +186,7 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
 - [x] **M0 骨架**：多模块工程、Flyway 迁移、统一响应、全局异常、traceId、Swagger、中间件体检
 - [x] **M1 用户与认证**：注册/登录/刷新/登出、JWT 双令牌 + Redis 白名单、Spring Security、登录限流、个人资料、他人主页
 - [x] **M2 阅读**：TXT 解析与幂等导入、小说列表/详情、目录、正文 + 缓存、阅读数写缓冲、书架
-- [ ] M3 评分与书评
+- [x] **M3 评分书评**：1-5 星一人一票、平均分增量维护 + 每日对账、书级评论区（最热/最新）、楼中楼、点赞幂等
 - [ ] M4 搜索（ES + IK + Outbox 同步）
 - [ ] M5 榜单
 - [ ] M6 社区
