@@ -10,11 +10,11 @@
 
 ## 一、任务汇报格式（强制）
 
-**每一次任务汇报都必须按下面三段式输出**，缺一段视为汇报未完成。汇报跟随最终答复一起给出，不要另起文件、不要只在注释或提交信息里写。
+**每一次任务汇报都必须按下面四段输出**，缺一段视为汇报未完成：**任务结论 → 实现路径 → 改动文件 → 验证方式**。汇报跟随最终答复一起给出，不要另起文件、不要只在注释或提交信息里写。
 
-**汇报是给人看的，不是给编译器看的。** 三段里最常写坏的是【实现路径】：把改动清单原样贴出来，类名一个不落，却没有一句"为什么这么做"。合格的汇报是**先用人话讲清思路与取舍，再把类名、队列名、配置项作为证据挂上去**。下面的反例与正例都是本仓库真实发生过的，照着正例的密度写。
+**汇报是给人看的，不是给编译器看的。** 四段里最常写坏的是【实现路径】：把改动清单原样贴出来，类名一个不落，却没有一句"为什么这么做"。合格的汇报是**先用人话讲清思路与取舍，再把类名、队列名、配置项作为证据挂上去**。下面的反例与正例都是本仓库真实发生过的，照着正例的密度写。
 
-> 一处格式差异：对话里的汇报三段标题齐全；写进 commit message 时，只有【任务结论】的标题换成裸结论句（见「汇报即提交」第 2 条）。不要因为写 commit，把对话里的标题也丢了。
+> 一处格式差异：对话里的汇报四段标题齐全；写进 commit message 时，只有【任务结论】的标题换成裸结论句（见「汇报即提交」第 2 条）。不要因为写 commit，把对话里的标题也丢了。
 
 ### 【任务结论】
 
@@ -53,6 +53,7 @@
 | 思路 | 一段话讲清"为什么这么解"，含被否掉的做法与功能清单 | 开头直接罗列类名 |
 | 功能 | 每个功能一段：怎么做的 + 为什么这么做 + 其中取舍 | "完成了注册登录功能" |
 | 组件 | `novel.event`（Topic）、`q.novel.search.sync`、`novel.search.#`，每个都带"为什么" | "配置了交换机" |
+| 文件 | 每个改动文件一行，标新增/修改，链接点得开 | "改了若干文件" |
 | 失败处理 | 3 次指数退避 → `q.novel.dead`，以 `commentId` 幂等 | "做了重试和幂等" |
 
 #### 补充规则
@@ -61,6 +62,21 @@
 - **功能的粒度是"用户能做的一件事"**（注册、登出、导入小说），不是"一个类"或"一层"（写 Mapper、加索引不算功能）。超过 6 个就合并同类项，别把一次任务写成 12 条流水账。
 - 只写**实际存在**的东西。设计好但未实现的一律标注"（设计，未实现）"。
 - 自检判据：**把汇报发给一个不熟悉本项目的人，他能否在 30 秒内说出"这次为什么这么改"**。说不出来就是名词堆砌，重写。
+
+### 【改动文件】
+
+**一行一个文件，链接必须能点开**，格式固定：
+
+```text
+- 新增 — [文件名](相对仓库根的路径) — 一句话说这个文件里改了什么
+- 修改 — [文件名](相对仓库根的路径) — 一句话说改了什么
+```
+
+- 只列**本次实际动过的文件**，测试、配置、SQL、文档、脚本都算；没动的不列。纯问答、纯排查这类没有落盘改动的任务写 `无（本次未改动文件）`，这一节不许省略。
+- 主干文件逐条列；同目录下性质相同的小文件（实体、Mapper、DTO、出入参对象）可以合并成一条，注明数量，并挂上该组里第一个文件的链接。
+- 按模块分组（`novel-api` / `novel-core` / `novel-infra` / 文档与脚本），组内按重要性排，不按字母排。
+- **只写相对路径**（如 `novel-core/src/main/java/...`）。`/home/...`、`C:\...`、`file://` 一律不合格——那些链接在别人机器上点不开。
+- 文件尚未创建、只是设计方案时，标"（设计，未实现）"，**不许编一条点不开的链接**。
 
 ### 【验证方式】
 
@@ -102,6 +118,18 @@
 >   - 另有 3 个实体、3 个 Mapper 与 6 个出入参对象，照 V1 表结构直译
 > - **失败处理**：用户看到的永远是同一份 `{code,message,traceId}` JSON，不会因为错在过滤器还是错在 Controller 就变成 HTML 错误页——过滤器链上的 401/403 由 `RestAuthenticationEntryPoint` / `RestAccessDeniedHandler` 直接写响应，Controller 内被 `@PreAuthorize` 拒绝的走 `GlobalExceptionHandler`。令牌过期、伪造、类型不符统一转 `10105`，不让过期异常冒成 500；注册并发重名转 `10101`；登录超限转 `42900`；续期旧令牌重放转 `10105`。
 >
+> **【改动文件】**
+> - 新增 — [TokenPort.java](novel-core/src/main/java/com/novel/core/user/port/TokenPort.java) — 令牌端口；同目录另有 4 个（仓储、白名单、哈希、限流）
+> - 新增 — [AuthService.java](novel-core/src/main/java/com/novel/core/user/application/AuthService.java) — 注册/登录/续期/登出编排；同目录另有 UserService 与 7 个出入参
+> - 新增 — [JwtTokenAdapter.java](novel-infra/src/main/java/com/novel/infra/security/JwtTokenAdapter.java) — JJWT 实现；同目录另有 5 个安全适配器与配置类
+> - 新增 — [UserRepositoryImpl.java](novel-infra/src/main/java/com/novel/infra/persistence/UserRepositoryImpl.java) — 用户仓储；同目录另有 3 个实体与 3 个 Mapper
+> - 新增 — [SecurityConfig.java](novel-api/src/main/java/com/novel/api/config/SecurityConfig.java) — 过滤器链装配与放行规则
+> - 新增 — [JwtAuthenticationFilter.java](novel-api/src/main/java/com/novel/api/security/JwtAuthenticationFilter.java) — 解析 Bearer；同目录另有 4 个响应与工具类
+> - 新增 — [AuthController.java](novel-api/src/main/java/com/novel/api/controller/AuthController.java)、[UserController.java](novel-api/src/main/java/com/novel/api/controller/UserController.java) — 7 个接口；同目录 4 个请求对象
+> - 修改 — [GlobalExceptionHandler.java](novel-api/src/main/java/com/novel/api/web/GlobalExceptionHandler.java) — 补 401/403 分支
+> - 修改 — [application.yml](novel-api/src/main/resources/application.yml) — 新增 JWT 与登录限流配置项
+> - 新增 — [AuthFlowIntegrationTest.java](novel-api/src/test/java/com/novel/api/AuthFlowIntegrationTest.java) — 13 个端到端用例；另有 3 个单测类
+>
 > **【验证方式】**
 > - 人话级：不带令牌请求 `GET /api/v1/users/me`，应看到 401 且响应体是 `{"code":40100,…}`；带上刚登录拿到的令牌再请求，应看到 200 和自己的昵称。
 > - `mvn test` → 39 个用例全绿；其中 `AuthFlowIntegrationTest` 用 Testcontainers 起 MySQL + Redis 跑完整链路，断言"旧 refresh 重放返回 `10105`"。
@@ -117,6 +145,10 @@
 > - **关键组件**：`novel.event`（Topic，业务事件入口）绑 `q.novel.search.sync`（索引同步队列，键 `novel.search.#`）；`novel.dlx`（Direct）把坏消息收进 `q.novel.dead`（键 `dead`）。前缀是为了在控制台一眼认出本项目的资源。
 > - **失败处理**：消费异常先按 3 次指数退避（1s/2s/4s）重试，仍失败则靠 `default-requeue-rejected: false` 送进 `q.novel.dead` 留现场，由补偿任务重放，而不是在客户端无限 requeue 把 CPU 打满；消费端先插 `mq_consume_log(message_key, consumer)`，唯一键冲突即跳过，以此幂等。
 >
+> **【改动文件】**
+> - 新增（设计，未实现）— `OutboxRelay`（轮询投递）与 `CommentConsumer`（索引同步）两个类，文件尚未创建，按规矩不给点不开的链接
+> - 修改 — [RabbitConfig.java](novel-infra/src/main/java/com/novel/infra/config/RabbitConfig.java) — 拓扑沿用现有的，只补消费端重试与死信参数
+>
 > **【验证方式】**
 > - 人话级：发一条评论后打开 `http://127.0.0.1:15672` 的队列页，`q.novel.search.sync` 应出现一条入队随即归零，`q.novel.dead` 应为 0。
 > - 日志：该 `traceId` 下先出现 `outbox 已写入`，再出现 `search sync consumed`。
@@ -127,7 +159,7 @@
 **每个任务结束时，在给出汇报的同时执行一次 Git 提交，提交信息就是这份汇报正文。**
 
 1. **暂存**：只 `git add` 本次任务实际改动的路径，**显式列文件名**。禁止 `git add -A` / `git add .`——那会把无关的半成品和本地配置一起卷进提交；`git status --short` 复核无误后再提交。
-2. **提交信息 = 汇报正文，但首行是纯结论句**：首行只写【任务结论】的**那句话本身**，**不带** `【任务结论】` 标题；空一行后接 `【实现路径】` 与 `【验证方式】` 两段（标题和内容照抄汇报）。这样 `git log --oneline` 一眼看到的就是结论，而不是 `【任务结论】 完成了…` 这种带标题的截断行。不加 `docs:` / `feat:` 之类前缀，不写"本次提交…"的额外流水账；结论句受本文件【任务结论】的 40 字上限约束，保证首行不会被 Git 截断。多行信息用 `git commit -F -` + heredoc 传入，不要用多个 `-m` 拼接：
+2. **提交信息 = 汇报正文，但首行是纯结论句**：首行只写【任务结论】的**那句话本身**，**不带** `【任务结论】` 标题；空一行后接 `【实现路径】`、`【改动文件】`、`【验证方式】` 三段（标题和内容照抄汇报）。这样 `git log --oneline` 一眼看到的就是结论，而不是 `【任务结论】 完成了…` 这种带标题的截断行。不加 `docs:` / `feat:` 之类前缀，不写"本次提交…"的额外流水账；结论句受本文件【任务结论】的 40 字上限约束，保证首行不会被 Git 截断。多行信息用 `git commit -F -` + heredoc 传入，不要用多个 `-m` 拼接：
 
    ```bash
    git add AGENTS.md novel-api/src/main/java/...
@@ -135,7 +167,11 @@
    一句话说明完成了什么。
 
    【实现路径】
-   - 创建了 …
+   - 整体思路：…
+   - 逐功能实现思路：…
+
+   【改动文件】
+   - 新增 — [X.java](novel-core/src/main/java/…/X.java) — 做了什么
 
    【验证方式】
    - 命令 / 日志 / 测试用例
