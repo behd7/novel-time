@@ -70,6 +70,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/search/**").permitAll()
                         // 榜单也是公开入口：它读的是快照，和阅读接口同级别的曝光面
                         .requestMatchers(HttpMethod.GET, "/api/v1/ranks").permitAll()
+                        // 社区浏览免登录：帖子列表、详情、评论列表都算公开内容
+                        .requestMatchers(HttpMethod.GET, "/api/v1/posts/**").permitAll()
                         // 书评的楼中楼是独立路径，不能靠 /novels/** 覆盖
                         .requestMatchers(HttpMethod.GET, "/api/v1/reviews/*/replies").permitAll()
                         // 顺序要点：更精确的 /users/me 必须排在 /users/* 前面

@@ -226,7 +226,7 @@ novel/                      聚合 POM（pom.xml）
 
 ### 2.4 包结构
 
-现状（M0 骨架 + M1 认证 + M2 阅读 + M3 评分书评 + M4 搜索）：
+现状（M0 骨架 + M1 认证 + M2 阅读 + M3 评分书评 + M4 搜索 + M5 榜单 + M6 社区）：
 
 ```
 com.novel.common
@@ -258,6 +258,10 @@ com.novel.core
 │   ├── domain/{Review, ReviewReply, LikeTargetType}
 │   ├── port/{RatingRepository, ReviewRepository, LikeRepository}
 │   └── application/{RatingService, ReviewService, ReviewSort, view/*}
+├── community/
+│   ├── domain/{Post, PostRef, PostComment}
+│   ├── port/PostRepository
+│   └── application/{PostService, PostSort, PostQuery, view/*}
 └── rank/
     ├── domain/{RankPeriod, RankEntry, RankAction, ScoredNovel}
     ├── port/{RankScoreStore, RankSnapshotRepository, RankCache}
@@ -269,7 +273,8 @@ com.novel.infra
 │            RankConfig, RankProperties}
 ├── persistence/{UserRepositoryImpl, NovelRepositoryImpl, ChapterRepositoryImpl,
 │                BookshelfRepositoryImpl, RatingRepositoryImpl, ReviewRepositoryImpl,
-│                LikeRepositoryImpl, RankSnapshotRepositoryImpl, entity/*, mapper/*}
+│                LikeRepositoryImpl, PostRepositoryImpl, RankSnapshotRepositoryImpl,
+│                entity/*, mapper/*}
 ├── security/{JwtTokenAdapter, JwtProperties, BCryptPasswordHasher,
 │             RedisTokenStore, RedisLoginAttemptLimiter, AuthRateLimitProperties}
 ├── cache/{RedisNovelCache, RedisNovelViewCounter, RedisRankScoreStore, RedisRankCache}
@@ -288,7 +293,7 @@ com.novel.api
 ├── NovelApplication                        # @SpringBootApplication(scanBasePackages = "com.novel")，排除 UserDetailsServiceAutoConfiguration
 ├── config/{OpenApiConfig, StorageBootstrap, SecurityConfig, SchedulingConfig}
 ├── controller/{AuthController, UserController, NovelController, CategoryController,
-│               BookshelfController, RatingController, ReviewController,
+│               BookshelfController, RatingController, ReviewController, PostController,
 │               SearchController, RankController, FileController, SystemController, dto/*}
 ├── importing/{NovelImportRunner, NovelReindexRunner, RankRefreshRunner}   # @Profile("import" / "reindex" / "rank")，跑完 System.exit
 ├── security/{JwtAuthenticationFilter, RestAuthenticationEntryPoint, RestAccessDeniedHandler,
@@ -307,7 +312,10 @@ ES 的 DSL、索引名、别名切换、Outbox 表全在 infra。core 里没有�
 
 > 榜单**故意不走 MQ**。理由写在 `RankScoreStore` 的注释里：它是近似指标，丢一次行为不影响正确性；
 > 而阅读是最频繁的写，每读一次就往 outbox 写一行，等于用"不丢事件"的代价换一个本来就允许有误差的数字。
-> 于是 `q.novel.rank.agg` 到 M5 结束仍然只有拓扑，留给 M6 社区热帖。
+> 于是 `q.novel.rank.agg` 到 M6 结束仍然只有拓扑：M5 的榜单不用它，M6 的社区热帖也选了读时 SQL 排序。
+
+**社区的端口倒置**：`PostRepository`（帖子/引用/评论）定义在 core，MyBatis-Plus 实体、分页与热帖 SQL 全在 infra。
+帖子不写 outbox、不进 ES：社区没有跨进程同步需求，写库同事务改计数就够了。
 
 `JwtAuthenticationFilter` **不带 `@Component`**，由 `SecurityConfig` 手动 new 进过滤器链 —— 标了 `@Component` 会被 Spring Boot 当普通 Servlet Filter 再注册一次，导致每个请求执行两遍。
 
@@ -356,7 +364,7 @@ Client
 > 现状：**M4 起 `q.novel.search.sync` 已接通**——生产者是 `OutboxRelay`（轮询投递，等 broker 确认），
 > 消费者是 `NovelSearchSyncConsumer`（手动 ack，失败 3 次退避后进 `q.novel.dead`）。
 > `q.novel.rank.agg` / `q.novel.stat.agg` 仍然只有拓扑。**M5 的榜单没有用 `q.novel.rank.agg`**（见 §2.4 末尾），
-> 两个队列留到 M6 社区热帖。
+> **M6 的社区热帖也没有用**——它按读时 SQL 公式排序，两个队列到 M6 结束仍只有拓扑。
 >
 > 事件类型即路由键：`novel.search.created` / `novel.search.updated` / `novel.search.deleted`，
 > 都落在 `novel.search.#` 下。以后加榜单同步时用 `novel.rank.#` 区分，不必改交换机。
@@ -418,8 +426,8 @@ Client
 > `novel.version`（V3 新增）是搜索索引的同步版本号，内容每变更一次 +1。它**不是**乐观锁：
 > 实体上刻意没有 `@Version`，两种语义混在一起后"版本冲突该重试还是该丢弃"就说不清了。
 
-> `user_stat` 的三个计数（`bookshelf_count` / `review_count` / `like_received`）**当前由业务代码同步维护**
-> —— 书架增删、书评增删、点赞增减各自加减一次，不依赖 MQ。将来接 `q.novel.stat.agg` 改成事件驱动时，
+> `user_stat` 的四个计数（`bookshelf_count` / `review_count` / `post_count` / `like_received`）**当前由业务代码同步维护**
+> —— 书架增删、书评增删、发帖删帖、点赞增减各自加减一次，不依赖 MQ。将来接 `q.novel.stat.agg` 改成事件驱动时，
 > 必须把这几处直接写库的调用一并去掉，否则会双写。
 >
 > `novel` 上的 `favorite_count` / `review_count` 同理：前者随书架增删、后者随书评增删同步维护。
@@ -487,7 +495,7 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active
 java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=rank
 
 # 测试
-mvn test                                  # 174 个用例，含 Testcontainers（需 Docker）
+mvn test                                  # 183 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
 mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
 mvn test -Dtest=AuthFlowIntegrationTest   # 认证链路端到端
@@ -495,6 +503,7 @@ mvn test -Dtest=AuthServiceTest           # 认证业务逻辑单元测试
 mvn test -Dtest=ReadingFlowIntegrationTest # 导入→列表→正文→书架端到端
 mvn test -Dtest=TxtNovelParserTest        # TXT 解析器纯单测
 mvn test -Dtest=ReviewFlowIntegrationTest  # 评分/书评/点赞端到端
+mvn test -Dtest=PostFlowIntegrationTest    # 社区发帖/引用/点赞/评论端到端
 mvn test -Dtest=RatingServiceTest          # 评分增量聚合单测
 mvn test -Dtest=SearchFlowIntegrationTest  # 导入→投递→可搜、评分同步、重建切别名
 mvn test -Dtest=OutboxRelayTest            # 投递退避与"放弃"状态流转
@@ -515,7 +524,7 @@ mvn test -Dtest=RankFlowIntegrationTest    # 行为→结算→读榜端到端
 - [x] **M3 评分书评**：1-5 星一人一票（增量聚合 + 每日对账自愈）、书级评论区（最热/最新、软删除、越权拦截）、楼中楼两层、点赞幂等
 - [x] **M4 搜索**：ES 索引 + 别名 + IK、Outbox 增量同步（投递确认 / 手动 ack / 死信）、手写 DSL 查询（高亮 / 筛选 / 五种排序）、搜索建议、每日全量重建（零停机切别名、写入失败不切换）
 - [x] **M5 榜单**：日/周/月/总四榜（ISO 周对齐）、Redis ZSET 实时层 + 按用户/IP 按天去重、10 分钟结算快照（整份替换）、读缓存、`hot_score` 回写（不进索引，等每日重建）
-- [ ] M6 社区
+- [x] **M6 社区**：帖子（结构化引用小说卡片 + 占位符回显）、最新/最热列表、帖子点赞、两层评论与评论点赞、作者软删除、发帖/评论/点赞计数同步维护
 - [ ] M7 工程收尾（压测 / CI / 架构图）
 
 ---

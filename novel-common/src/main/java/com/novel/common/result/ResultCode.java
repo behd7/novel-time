@@ -47,6 +47,8 @@ public enum ResultCode {
 
     // ---------- 业务：社区 ----------
     POST_NOT_FOUND(10501, "帖子不存在"),
+    POST_NO_PERMISSION(10502, "只能操作自己发布的内容"),
+    POST_COMMENT_NOT_FOUND(10503, "帖子评论不存在"),
 
     // ---------- 业务：搜索 ----------
     SEARCH_UNAVAILABLE(10601, "搜索服务暂不可用"),

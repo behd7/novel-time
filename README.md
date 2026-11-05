@@ -132,7 +132,7 @@ curl http://127.0.0.1:8080/api/v1/users/me -H "Authorization: Bearer $ACCESS_TOK
 ### 测试
 
 ```bash
-mvn test                                    # 174 个用例（含 Testcontainers，需要 Docker）
+mvn test                                    # 183 个用例（含 Testcontainers，需要 Docker）
 mvn test -Dtest=ArchitectureTest            # 只跑架构约束
 mvn test -Dtest=AuthFlowIntegrationTest     # 认证链路端到端（起 MySQL + Redis 容器）
 mvn test -Dtest=AuthServiceTest             # 认证业务逻辑单元测试（纯 Mock，1 秒内跑完）
@@ -140,6 +140,7 @@ mvn test -Dtest=ReadingFlowIntegrationTest  # 导入→列表→正文→书架�
 mvn test -Dtest=TxtNovelParserTest          # TXT 解析器纯单测
 mvn test -Dtest=ReviewFlowIntegrationTest   # 评分/书评/点赞端到端
 mvn test -Dtest=RatingServiceTest           # 评分增量聚合单测
+mvn test -Dtest=PostFlowIntegrationTest     # 社区发帖/引用/点赞/评论端到端
 ```
 
 ## 阅读
@@ -190,6 +191,29 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
 - 章节正文缓存 2 小时（`novel:chapter:text:{id}`），分类缓存 10 分钟（`novel:categories`）
 - 小说详情**不缓存**：主键查询 1ms，为它维护失效逻辑不划算
 - 阅读数先累加到 `novel:view:delta`（Redis Hash），由 `ViewCountFlushJob` 每 60 秒合并回库
+
+## 社区
+
+帖子里的引用是**结构化**的：正文只留 `[[ref:0]]`，真实关系落 `post_novel_ref`，详情接口把
+`refs` 连同书名/作者/封面/评分一起返回，前端按 `refText` 替换成卡片。小说改名换封面自动同步，也伪造不了外链。
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/api/v1/posts` | 否 | 列表，`sort=hot\|latest`，可选 `novelId` 反查引用了这本书的帖子 |
+| POST | `/api/v1/posts` | 是 | 发帖，`refNovelIds` 的下标对应正文里的 `[[ref:N]]`，最多 5 本 |
+| GET | `/api/v1/posts/{id}` | 否 | 详情，返回正文 + `refs` 卡片；浏览数 +1 |
+| DELETE | `/api/v1/posts/{id}` | 是 | 只删自己的（软删除） |
+| POST/DELETE | `/api/v1/posts/{id}/like` | 是 | 点赞/取消，幂等 |
+| GET | `/api/v1/posts/{id}/comments` | 否 | 平铺分页，前端按 `rootId` 归并成两层 |
+| POST | `/api/v1/posts/{id}/comments` | 是 | 发评论，带 `parentCommentId` 即楼中楼 |
+| DELETE | `/api/v1/comments/{id}` | 是 | 只删自己的 |
+| POST/DELETE | `/api/v1/comments/{id}/like` | 是 | 评论点赞/取消，幂等 |
+
+- 帖子与评论都走软删除（`deleted=1`），查询自动过滤；楼中楼可能还引用着主楼，不能物理删
+- 点赞复用书评那张 `like_record`，唯一键 `(target_type, target_id, user_id)` 保证一人一次
+- 热帖按 `(like_count*3 + comment_count*5) / POW(小时数+2, 1.2)` 读时排序，和书评最热同一写法
+- 计数同步维护：`post.like_count` / `comment_count`、`post_comment.like_count`、`user_stat.post_count` / `like_received`
+- 社区不写 outbox、不进 ES、不新增 Redis 键
 
 ## 搜索
 
@@ -257,7 +281,7 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active
 - [x] **M3 评分书评**：1-5 星一人一票、平均分增量维护 + 每日对账、书级评论区（最热/最新）、楼中楼、点赞幂等
 - [x] **M4 搜索**：ES 索引 + 别名 + IK、Outbox 增量同步（投递确认 / 手动 ack / 死信）、高亮与筛选排序、搜索建议、每日全量重建
 - [x] **M5 榜单**：日/周/月/总四榜、Redis ZSET 实时层（按人按天去重）、10 分钟结算快照、读缓存、`hot_score` 回写
-- [ ] M6 社区
+- [x] **M6 社区**：帖子 + 结构化小说引用（卡片回显、按书反查）、最新/最热列表、帖子与评论点赞、两层评论、作者软删除、计数同步维护
 - [ ] M7 工程收尾（压测 / CI / 架构图）
 
 ## 约定

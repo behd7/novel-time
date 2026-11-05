@@ -103,6 +103,11 @@ public class UserRepositoryImpl implements UserRepository {
     }
 
     @Override
+    public void addPostCount(long userId, int delta) {
+        userStatMapper.addPostCount(userId, delta);
+    }
+
+    @Override
     public void addBookshelfCount(long userId, int delta) {
         userStatMapper.addBookshelfCount(userId, delta);
     }

@@ -41,6 +41,9 @@ public interface UserRepository {
     /** 书评数统计，个人主页要显示。 */
     void addReviewCount(long userId, int delta);
 
+    /** 发帖数统计，个人主页要显示。 */
+    void addPostCount(long userId, int delta);
+
     /** 书架收藏数统计。 */
     void addBookshelfCount(long userId, int delta);
 
