@@ -18,7 +18,8 @@ public interface LikeRepository {
     /** 幂等：唯一键冲突直接忽略，不需要先查再插。 */
     void add(LikeTargetType type, long targetId, long userId);
 
-    void remove(LikeTargetType type, long targetId, long userId);
+    /** @return 是否真的删掉了一行；并发取消时第二个请求会返回 false，调用方不能重复回退计数。 */
+    boolean remove(LikeTargetType type, long targetId, long userId);
 
     Set<Long> likedTargetIds(LikeTargetType type, Collection<Long> targetIds, long userId);
 }

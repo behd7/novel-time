@@ -237,6 +237,7 @@ class PostFlowIntegrationTest {
 
         assertThat(reply.path("parentCommentId").asLong()).isEqualTo(topId);
         assertThat(reply.path("parentNickname").asText()).isEqualTo("postCommentFirst");
+        assertThat(reply.path("rootId").asLong()).isEqualTo(topId);
 
         JsonNode comments = readJson(mockMvc.perform(get("/api/v1/posts/" + postId + "/comments"))
                 .andExpect(status().isOk()).andReturn()).path("data");
@@ -247,6 +248,15 @@ class PostFlowIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + first))
                 .andExpect(status().isOk());
         assertThat(postDetail(postId, null).path("commentCount").asInt()).isEqualTo(1);
+
+        // 主楼被删后回复仍在：rootId 与 parentCommentId 不能丢，父昵称置空、parentDeleted 标记
+        JsonNode afterDelete = readJson(mockMvc.perform(get("/api/v1/posts/" + postId + "/comments"))
+                .andExpect(status().isOk()).andReturn()).path("data").path("list");
+        assertThat(afterDelete).hasSize(1);
+        assertThat(afterDelete.get(0).path("rootId").asLong()).isEqualTo(topId);
+        assertThat(afterDelete.get(0).path("parentCommentId").asLong()).isEqualTo(topId);
+        assertThat(afterDelete.get(0).path("parentDeleted").asBoolean()).isTrue();
+        assertThat(afterDelete.get(0).hasNonNull("parentNickname")).isFalse();
     }
 
     @Test

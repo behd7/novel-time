@@ -132,7 +132,7 @@ curl http://127.0.0.1:8080/api/v1/users/me -H "Authorization: Bearer $ACCESS_TOK
 ### 测试
 
 ```bash
-mvn test                                    # 183 个用例（含 Testcontainers，需要 Docker）
+mvn test                                    # 187 个用例（含 Testcontainers，需要 Docker）
 mvn test -Dtest=ArchitectureTest            # 只跑架构约束
 mvn test -Dtest=AuthFlowIntegrationTest     # 认证链路端到端（起 MySQL + Redis 容器）
 mvn test -Dtest=AuthServiceTest             # 认证业务逻辑单元测试（纯 Mock，1 秒内跑完）
@@ -141,6 +141,7 @@ mvn test -Dtest=TxtNovelParserTest          # TXT 解析器纯单测
 mvn test -Dtest=ReviewFlowIntegrationTest   # 评分/书评/点赞端到端
 mvn test -Dtest=RatingServiceTest           # 评分增量聚合单测
 mvn test -Dtest=PostFlowIntegrationTest     # 社区发帖/引用/点赞/评论端到端
+mvn test -Dtest=PostServiceTest             # 社区计数回退与详情自增边界单测
 ```
 
 ## 阅读
@@ -210,6 +211,7 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
 | POST/DELETE | `/api/v1/comments/{id}/like` | 是 | 评论点赞/取消，幂等 |
 
 - 帖子与评论都走软删除（`deleted=1`），查询自动过滤；楼中楼可能还引用着主楼，不能物理删
+- 评论视图同时返回 `rootId` 与 `parentDeleted`：父评论被删后仍保留 `parentCommentId`，回复不会退化成顶级评论
 - 点赞复用书评那张 `like_record`，唯一键 `(target_type, target_id, user_id)` 保证一人一次
 - 热帖按 `(like_count*3 + comment_count*5) / POW(小时数+2, 1.2)` 读时排序，和书评最热同一写法
 - 计数同步维护：`post.like_count` / `comment_count`、`post_comment.like_count`、`user_stat.post_count` / `like_received`

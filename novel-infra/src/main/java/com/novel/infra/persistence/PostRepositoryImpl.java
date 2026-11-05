@@ -111,14 +111,14 @@ public class PostRepositoryImpl implements PostRepository {
     }
 
     @Override
-    public void softDelete(long postId) {
+    public boolean softDelete(long postId) {
         // 实体上有 @TableLogic，deleteById 会变成 UPDATE deleted = 1
-        postMapper.deleteById(postId);
+        return postMapper.deleteById(postId) > 0;
     }
 
     @Override
-    public void addViewCount(long postId) {
-        postMapper.addViewCount(postId);
+    public boolean addViewCount(long postId) {
+        return postMapper.addViewCount(postId) > 0;
     }
 
     @Override
@@ -178,8 +178,8 @@ public class PostRepositoryImpl implements PostRepository {
     }
 
     @Override
-    public void softDeleteComment(long commentId) {
-        postCommentMapper.deleteById(commentId);
+    public boolean softDeleteComment(long commentId) {
+        return postCommentMapper.deleteById(commentId) > 0;
     }
 
     @Override

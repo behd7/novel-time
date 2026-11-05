@@ -121,6 +121,7 @@ class RankRecordingTest {
         RatingService rating = mock(RatingService.class);
         when(reviews.findById(7L)).thenReturn(Optional.of(
                 new Review(7L, 1L, 9L, "好", null, 2, 0, LocalDateTime.of(2026, 11, 5, 10, 0))));
+        when(reviews.softDelete(7L)).thenReturn(true);
 
         service(reviews, rating).delete(7L, 9L);
 
@@ -149,6 +150,7 @@ class RankRecordingTest {
         RatingService rating = mock(RatingService.class);
         when(reviews.findById(7L)).thenReturn(Optional.of(
                 new Review(7L, 1L, 9L, "好", null, 2, 0, LocalDateTime.of(2026, 11, 5, 10, 0))));
+        when(reviews.softDelete(7L)).thenReturn(true);
 
         service(reviews, rating).delete(7L, 9L);
 

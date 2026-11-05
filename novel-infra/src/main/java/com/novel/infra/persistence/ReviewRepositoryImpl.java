@@ -74,9 +74,9 @@ public class ReviewRepositoryImpl implements ReviewRepository {
     }
 
     @Override
-    public void softDelete(long reviewId) {
+    public boolean softDelete(long reviewId) {
         // 实体上有 @TableLogic，deleteById 会变成 UPDATE deleted = 1
-        reviewMapper.deleteById(reviewId);
+        return reviewMapper.deleteById(reviewId) > 0;
     }
 
     @Override
@@ -129,8 +129,8 @@ public class ReviewRepositoryImpl implements ReviewRepository {
     }
 
     @Override
-    public void softDeleteReply(long replyId) {
-        reviewReplyMapper.deleteById(replyId);
+    public boolean softDeleteReply(long replyId) {
+        return reviewReplyMapper.deleteById(replyId) > 0;
     }
 
     @Override

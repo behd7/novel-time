@@ -30,9 +30,10 @@ public interface PostRepository {
     List<PostRef> findRefs(long postId);
 
     /** 软删除：内容还在，查询会过滤掉。楼中楼可能还引用着主楼，不能物理删。 */
-    void softDelete(long postId);
+    boolean softDelete(long postId);
 
-    void addViewCount(long postId);
+    /** @return 是否真的自增了一行；帖子不存在、已删或已隐藏时返回 false。 */
+    boolean addViewCount(long postId);
 
     void addLikeCount(long postId, int delta);
 
@@ -48,7 +49,7 @@ public interface PostRepository {
 
     PageResult<PostComment> pageComments(long postId, int page, int size);
 
-    void softDeleteComment(long commentId);
+    boolean softDeleteComment(long commentId);
 
     void addCommentLikeCount(long commentId, int delta);
 }

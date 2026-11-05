@@ -24,7 +24,7 @@ public interface ReviewRepository {
     PageResult<Review> pageByNovel(long novelId, ReviewSort sort, int page, int size);
 
     /** 软删除：内容还在，但查询会过滤掉。保留是为了处理"楼中楼还在、主楼被删"的情况。 */
-    void softDelete(long reviewId);
+    boolean softDelete(long reviewId);
 
     void addLikeCount(long reviewId, int delta);
 
@@ -40,7 +40,7 @@ public interface ReviewRepository {
 
     PageResult<ReviewReply> pageReplies(long reviewId, int page, int size);
 
-    void softDeleteReply(long replyId);
+    boolean softDeleteReply(long replyId);
 
     void addReplyLikeCount(long replyId, int delta);
 }

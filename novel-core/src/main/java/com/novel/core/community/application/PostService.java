@@ -15,23 +15,22 @@ import com.novel.core.novel.domain.Novel;
 import com.novel.core.novel.port.NovelRepository;
 import com.novel.core.review.domain.LikeTargetType;
 import com.novel.core.review.port.LikeRepository;
+import com.novel.core.support.LikeCounter;
+import com.novel.core.support.ProfileLoader;
+import com.novel.core.support.Texts;
 import com.novel.core.user.domain.UserProfile;
 import com.novel.core.user.port.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.function.IntConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -70,7 +69,7 @@ public class PostService {
             return PageResult.of(List.of(), posts.getTotal(), posts.getPage(), posts.getSize());
         }
 
-        Map<Long, UserProfile> profiles = loadProfiles(
+        Map<Long, UserProfile> profiles = ProfileLoader.load(userRepository,
                 posts.getList().stream().map(Post::userId).toList());
         Set<Long> likedIds = currentUserId == null ? Set.of()
                 : likeRepository.likedTargetIds(LikeTargetType.POST,
@@ -84,9 +83,10 @@ public class PostService {
 
     /** 详情会累加一次浏览数；浏览数不进热帖公式，避免刷阅读量影响排序。 */
     public PostDetailView detail(long postId, Long currentUserId) {
-        requirePost(postId);
-        postRepository.addViewCount(postId);
-        // 重新读一次，否则返回的 viewCount 还是自增前的旧值
+        // 自增本身就是存在性检查：帖子不存在、已删或已隐藏时影响 0 行
+        if (!postRepository.addViewCount(postId)) {
+            throw new BizException(ResultCode.POST_NOT_FOUND);
+        }
         return assembleDetail(requirePost(postId), currentUserId);
     }
 
@@ -99,8 +99,8 @@ public class PostService {
     @Transactional
     public PostDetailView create(long userId, String title, String content,
                                  String coverKey, List<Long> refNovelIds) {
-        String safeTitle = requireText(title, MAX_TITLE_LENGTH, "标题");
-        String safeContent = requireText(content, MAX_CONTENT_LENGTH, "正文");
+        String safeTitle = Texts.require(title, MAX_TITLE_LENGTH, "标题");
+        String safeContent = Texts.require(content, MAX_CONTENT_LENGTH, "正文");
 
         List<Long> refIds = refNovelIds == null ? List.of() : refNovelIds;
         if (refIds.size() > MAX_REFS) {
@@ -131,7 +131,9 @@ public class PostService {
         if (post.userId() != userId) {
             throw new BizException(ResultCode.POST_NO_PERMISSION);
         }
-        postRepository.softDelete(postId);
+        if (!postRepository.softDelete(postId)) {
+            return;
+        }
         userRepository.addPostCount(userId, -1);
         log.info("删除帖子 postId={} userId={}", postId, userId);
     }
@@ -139,7 +141,7 @@ public class PostService {
     @Transactional
     public void like(long postId, long userId, boolean like) {
         Post post = requirePost(postId);
-        changeLike(LikeTargetType.POST, postId, userId, like, delta -> {
+        LikeCounter.change(likeRepository, LikeTargetType.POST, postId, userId, like, delta -> {
             postRepository.addLikeCount(postId, delta);
             userRepository.addLikeReceived(post.userId(), delta);
         });
@@ -167,23 +169,25 @@ public class PostService {
         List<Long> userIds = new ArrayList<>(
                 comments.getList().stream().map(PostComment::userId).toList());
         parents.values().forEach(parent -> userIds.add(parent.userId()));
-        Map<Long, UserProfile> profiles = loadProfiles(userIds);
+        Map<Long, UserProfile> profiles = ProfileLoader.load(userRepository, userIds);
 
         Set<Long> likedIds = currentUserId == null ? Set.of()
                 : likeRepository.likedTargetIds(LikeTargetType.POST_COMMENT,
                 comments.getList().stream().map(PostComment::id).toList(), currentUserId);
 
         List<PostCommentView> views = comments.getList().stream().map(comment -> {
-            PostComment parent = comment.parentCommentId() > 0
-                    ? parents.get(comment.parentCommentId()) : null;
+            long parentId = comment.parentCommentId();
+            PostComment parent = parentId > 0 ? parents.get(parentId) : null;
+            boolean parentDeleted = parentId > 0 && parent == null;
             UserProfile author = profiles.get(comment.userId());
             UserProfile parentAuthor = parent == null ? null : profiles.get(parent.userId());
             return new PostCommentView(comment.id(), comment.userId(),
                     author == null ? "" : author.nickname(),
                     author == null ? null : author.avatarKey(),
-                    comment.content(),
-                    parent == null ? null : parent.id(),
+                    comment.content(), comment.rootId(),
+                    parentId > 0 ? parentId : null,
                     parentAuthor == null ? null : parentAuthor.nickname(),
+                    parentDeleted,
                     comment.likeCount(), likedIds.contains(comment.id()), comment.createdAt());
         }).toList();
 
@@ -192,7 +196,7 @@ public class PostService {
 
     @Transactional
     public PostCommentView createComment(long postId, long userId, String content, Long parentCommentId) {
-        String text = requireText(content, MAX_COMMENT_LENGTH, "评论");
+        String text = Texts.require(content, MAX_COMMENT_LENGTH, "评论");
         requirePost(postId);
 
         long parentId = 0L;
@@ -222,7 +226,9 @@ public class PostService {
         if (comment.userId() != userId) {
             throw new BizException(ResultCode.POST_NO_PERMISSION);
         }
-        postRepository.softDeleteComment(commentId);
+        if (!postRepository.softDeleteComment(commentId)) {
+            return;
+        }
         postRepository.addCommentCount(comment.postId(), -1);
         log.info("删除帖子评论 commentId={} userId={}", commentId, userId);
     }
@@ -231,7 +237,7 @@ public class PostService {
     public void likeComment(long commentId, long userId, boolean like) {
         PostComment comment = postRepository.findCommentById(commentId)
                 .orElseThrow(() -> new BizException(ResultCode.POST_COMMENT_NOT_FOUND));
-        changeLike(LikeTargetType.POST_COMMENT, commentId, userId, like, delta -> {
+        LikeCounter.change(likeRepository, LikeTargetType.POST_COMMENT, commentId, userId, like, delta -> {
             postRepository.addCommentLikeCount(commentId, delta);
             userRepository.addLikeReceived(comment.userId(), delta);
         });
@@ -282,7 +288,8 @@ public class PostService {
         boolean liked = currentUserId != null
                 && likeRepository.exists(LikeTargetType.POST_COMMENT, commentId, currentUserId);
         return new PostCommentView(comment.id(), comment.userId(), profile.nickname(), profile.avatarKey(),
-                comment.content(), parent == null ? null : parent.id(), parentNickname,
+                comment.content(), comment.rootId(), parent == null ? null : parent.id(), parentNickname,
+                comment.parentCommentId() > 0 && parent == null,
                 comment.likeCount(), liked, comment.createdAt());
     }
 
@@ -331,47 +338,5 @@ public class PostService {
     private String summary(String content) {
         String text = REF_PLACEHOLDER.matcher(content).replaceAll("").trim();
         return text.length() <= SUMMARY_LENGTH ? text : text.substring(0, SUMMARY_LENGTH) + "…";
-    }
-
-    /**
-     * 点赞/取消。
-     *
-     * <p>和书评点赞同一套做法：先查再写有并发窗口，所以真正插入成功后才加计数，
-     * 撞唯一键的那次直接忽略——最多让一个请求白跑，不会把计数加两次。
-     */
-    private void changeLike(LikeTargetType type, long targetId, long userId,
-                            boolean like, IntConsumer counter) {
-        boolean existed = likeRepository.exists(type, targetId, userId);
-        if (like && !existed) {
-            try {
-                likeRepository.add(type, targetId, userId);
-                counter.accept(1);
-            } catch (DuplicateKeyException ignored) {
-                // 并发重复点赞，另一个请求已经加过计数
-            }
-        } else if (!like && existed) {
-            likeRepository.remove(type, targetId, userId);
-            counter.accept(-1);
-        }
-    }
-
-    private Map<Long, UserProfile> loadProfiles(Collection<Long> userIds) {
-        if (userIds == null || userIds.isEmpty()) {
-            return Map.of();
-        }
-        Map<Long, UserProfile> map = new HashMap<>();
-        userRepository.findProfiles(userIds).forEach(profile -> map.put(profile.userId(), profile));
-        return map;
-    }
-
-    private String requireText(String content, int maxLength, String field) {
-        if (content == null || content.isBlank()) {
-            throw new BizException(ResultCode.BAD_REQUEST, field + "内容不能为空");
-        }
-        String text = content.trim();
-        if (text.length() > maxLength) {
-            throw new BizException(ResultCode.BAD_REQUEST, field + "不能超过 " + maxLength + " 字");
-        }
-        return text;
     }
 }

@@ -235,6 +235,7 @@ com.novel.common
 
 com.novel.core
 ├── storage/{StoragePort, FileService, FileBizType, PresignedUpload}
+├── support/{LikeCounter, ProfileLoader, Texts}
 ├── user/
 │   ├── domain/{UserAccount, UserProfile, UserStat}
 │   ├── port/{UserRepository, TokenPort, RefreshTokenStore, PasswordHasher, LoginAttemptLimiter}
@@ -495,7 +496,7 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active
 java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=rank
 
 # 测试
-mvn test                                  # 183 个用例，含 Testcontainers（需 Docker）
+mvn test                                  # 187 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
 mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
 mvn test -Dtest=AuthFlowIntegrationTest   # 认证链路端到端
@@ -504,6 +505,7 @@ mvn test -Dtest=ReadingFlowIntegrationTest # 导入→列表→正文→书架�
 mvn test -Dtest=TxtNovelParserTest        # TXT 解析器纯单测
 mvn test -Dtest=ReviewFlowIntegrationTest  # 评分/书评/点赞端到端
 mvn test -Dtest=PostFlowIntegrationTest    # 社区发帖/引用/点赞/评论端到端
+mvn test -Dtest=PostServiceTest            # 社区计数回退与详情自增边界单测
 mvn test -Dtest=RatingServiceTest          # 评分增量聚合单测
 mvn test -Dtest=SearchFlowIntegrationTest  # 导入→投递→可搜、评分同步、重建切别名
 mvn test -Dtest=OutboxRelayTest            # 投递退避与"放弃"状态流转

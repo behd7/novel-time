@@ -37,11 +37,11 @@ public class LikeRepositoryImpl implements LikeRepository {
     }
 
     @Override
-    public void remove(LikeTargetType type, long targetId, long userId) {
-        likeMapper.delete(Wrappers.<LikeEntity>lambdaQuery()
+    public boolean remove(LikeTargetType type, long targetId, long userId) {
+        return likeMapper.delete(Wrappers.<LikeEntity>lambdaQuery()
                 .eq(LikeEntity::getUserId, userId)
                 .eq(LikeEntity::getTargetType, type.name())
-                .eq(LikeEntity::getTargetId, targetId));
+                .eq(LikeEntity::getTargetId, targetId)) > 0;
     }
 
     @Override

@@ -13,22 +13,21 @@ import com.novel.core.review.domain.Review;
 import com.novel.core.review.domain.ReviewReply;
 import com.novel.core.review.port.LikeRepository;
 import com.novel.core.review.port.ReviewRepository;
+import com.novel.core.support.LikeCounter;
+import com.novel.core.support.ProfileLoader;
+import com.novel.core.support.Texts;
 import com.novel.core.user.domain.UserProfile;
 import com.novel.core.user.port.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.function.IntConsumer;
 import java.util.stream.Collectors;
 
 /**
@@ -65,7 +64,7 @@ public class ReviewService {
             return PageResult.of(List.of(), reviews.getTotal(), reviews.getPage(), reviews.getSize());
         }
 
-        Map<Long, UserProfile> profiles = loadProfiles(
+        Map<Long, UserProfile> profiles = ProfileLoader.load(userRepository,
                 reviews.getList().stream().map(Review::userId).toList());
         Set<Long> likedIds = currentUserId == null ? Set.of()
                 : likeRepository.likedTargetIds(LikeTargetType.REVIEW,
@@ -85,7 +84,7 @@ public class ReviewService {
      */
     @Transactional
     public ReviewView create(long novelId, long userId, String content, Integer score) {
-        String text = requireText(content, MAX_REVIEW_LENGTH, "书评");
+        String text = Texts.require(content, MAX_REVIEW_LENGTH, "书评");
         novelRepository.findById(novelId)
                 .orElseThrow(() -> new BizException(ResultCode.NOVEL_NOT_FOUND));
 
@@ -110,7 +109,9 @@ public class ReviewService {
         if (review.userId() != userId) {
             throw new BizException(ResultCode.REVIEW_NO_PERMISSION);
         }
-        reviewRepository.softDelete(reviewId);
+        if (!reviewRepository.softDelete(reviewId)) {
+            return;
+        }
         userRepository.addReviewCount(userId, -1);
         novelRepository.addReviewCount(review.novelId(), -1);
         rankScoreStore.recordAction(review.novelId(), RankAction.REVIEW, -1);
@@ -140,7 +141,7 @@ public class ReviewService {
         List<Long> userIds = new java.util.ArrayList<>(
                 replies.getList().stream().map(ReviewReply::userId).toList());
         parents.values().forEach(parent -> userIds.add(parent.userId()));
-        Map<Long, UserProfile> profiles = loadProfiles(userIds);
+        Map<Long, UserProfile> profiles = ProfileLoader.load(userRepository, userIds);
 
         Set<Long> likedIds = currentUserId == null ? Set.of()
                 : likeRepository.likedTargetIds(LikeTargetType.REPLY,
@@ -164,7 +165,7 @@ public class ReviewService {
 
     @Transactional
     public ReviewReplyView createReply(long reviewId, long userId, String content, Long parentReplyId) {
-        String text = requireText(content, MAX_REPLY_LENGTH, "回复");
+        String text = Texts.require(content, MAX_REPLY_LENGTH, "回复");
         reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new BizException(ResultCode.REVIEW_NOT_FOUND));
 
@@ -194,7 +195,9 @@ public class ReviewService {
         if (reply.userId() != userId) {
             throw new BizException(ResultCode.REVIEW_NO_PERMISSION);
         }
-        reviewRepository.softDeleteReply(replyId);
+        if (!reviewRepository.softDeleteReply(replyId)) {
+            return;
+        }
         reviewRepository.addReplyCount(reply.reviewId(), -1);
     }
 
@@ -204,7 +207,7 @@ public class ReviewService {
     public void likeReview(long reviewId, long userId, boolean like) {
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new BizException(ResultCode.REVIEW_NOT_FOUND));
-        changeLike(LikeTargetType.REVIEW, reviewId, userId, like, delta -> {
+        LikeCounter.change(likeRepository, LikeTargetType.REVIEW, reviewId, userId, like, delta -> {
             reviewRepository.addLikeCount(reviewId, delta);
             userRepository.addLikeReceived(review.userId(), delta);
         });
@@ -214,31 +217,10 @@ public class ReviewService {
     public void likeReply(long replyId, long userId, boolean like) {
         ReviewReply reply = reviewRepository.findReplyById(replyId)
                 .orElseThrow(() -> new BizException(ResultCode.REVIEW_NOT_FOUND));
-        changeLike(LikeTargetType.REPLY, replyId, userId, like, delta -> {
+        LikeCounter.change(likeRepository, LikeTargetType.REPLY, replyId, userId, like, delta -> {
             reviewRepository.addReplyLikeCount(replyId, delta);
             userRepository.addLikeReceived(reply.userId(), delta);
         });
-    }
-
-    /**
-     * 点赞/取消。
-     *
-     * <p>先查再写会有并发窗口：两个请求同时点赞，都查到"没点过"，然后一个成功一个撞唯一键。
-     * 所以是真插入成功之后才加计数，撞键的那次直接忽略——最多让一个请求白跑，不会把计数加两次。
-     */
-    private void changeLike(LikeTargetType type, long targetId, long userId, boolean like, IntConsumer counter) {
-        boolean existed = likeRepository.exists(type, targetId, userId);
-        if (like && !existed) {
-            try {
-                likeRepository.add(type, targetId, userId);
-                counter.accept(1);
-            } catch (DuplicateKeyException ignored) {
-                // 并发重复点赞，另一个请求已经加过计数
-            }
-        } else if (!like && existed) {
-            likeRepository.remove(type, targetId, userId);
-            counter.accept(-1);
-        }
     }
 
     // ------------------------------------------------------------------ 组装
@@ -273,26 +255,5 @@ public class ReviewService {
                 profile == null ? null : profile.avatarKey(),
                 review.content(), review.score(),
                 review.likeCount(), review.replyCount(), liked, review.createdAt());
-    }
-
-    private Map<Long, UserProfile> loadProfiles(Collection<Long> userIds) {
-        if (userIds == null || userIds.isEmpty()) {
-            return Map.of();
-        }
-        Map<Long, UserProfile> map = new HashMap<>();
-        List<UserProfile> profiles = userRepository.findProfiles(userIds);
-        profiles.forEach(profile -> map.put(profile.userId(), profile));
-        return map;
-    }
-
-    private String requireText(String content, int maxLength, String field) {
-        if (content == null || content.isBlank()) {
-            throw new BizException(ResultCode.BAD_REQUEST, field + "内容不能为空");
-        }
-        String text = content.trim();
-        if (text.length() > maxLength) {
-            throw new BizException(ResultCode.BAD_REQUEST, field + "不能超过 " + maxLength + " 字");
-        }
-        return text;
     }
 }
