@@ -15,6 +15,7 @@ import com.novel.core.novel.port.ChapterRepository;
 import com.novel.core.novel.port.NovelCache;
 import com.novel.core.novel.port.NovelRepository;
 import com.novel.core.novel.port.NovelViewCounter;
+import com.novel.core.rank.port.RankScoreStore;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -35,6 +36,7 @@ public class NovelService {
     private final ChapterRepository chapterRepository;
     private final NovelCache novelCache;
     private final NovelViewCounter viewCounter;
+    private final RankScoreStore rankScoreStore;
 
     public PageResult<NovelSummaryView> list(NovelQuery query) {
         PageResult<Novel> page = novelRepository.page(query);
@@ -42,11 +44,13 @@ public class NovelService {
         return PageResult.of(views, page.getTotal(), page.getPage(), page.getSize());
     }
 
-    public NovelDetailView detail(long novelId) {
+    public NovelDetailView detail(long novelId, String viewerKey) {
         Novel novel = requireNovel(novelId);
 
         // 先攒计数再读增量，这样本次访问也算进去
         viewCounter.increment(novelId);
+        // 榜单是近似指标，这次 Redis 调用失败不该让详情页打不开，所以不计入事务、失败也不拦
+        rankScoreStore.recordView(viewerKey, novelId);
         long viewCount = novel.viewCount() + viewCounter.pendingDelta(novelId);
 
         Chapter latest = novel.latestChapterId() == null
@@ -112,11 +116,7 @@ public class NovelService {
     }
 
     private NovelSummaryView toSummary(Novel novel) {
-        return new NovelSummaryView(
-                novel.id(), novel.title(), novel.authorName(), novel.coverKey(), novel.categoryId(),
-                novel.status(), novel.intro(), novel.wordCount(), novel.chapterCount(),
-                novel.avgRating(), novel.ratingCount(), novel.viewCount(), novel.favoriteCount(),
-                novel.latestUpdateAt());
+        return NovelSummaryView.from(novel);
     }
 
     private CategoryView toCategoryView(Category category) {

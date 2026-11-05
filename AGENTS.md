@@ -254,19 +254,25 @@ com.novel.core
 │   ├── domain/BookshelfItem
 │   ├── port/BookshelfRepository
 │   └── application/{BookshelfService, view/BookshelfView}
-└── review/
-    ├── domain/{Review, ReviewReply, LikeTargetType}
-    ├── port/{RatingRepository, ReviewRepository, LikeRepository}
-    └── application/{RatingService, ReviewService, ReviewSort, view/*}
+├── review/
+│   ├── domain/{Review, ReviewReply, LikeTargetType}
+│   ├── port/{RatingRepository, ReviewRepository, LikeRepository}
+│   └── application/{RatingService, ReviewService, ReviewSort, view/*}
+└── rank/
+    ├── domain/{RankPeriod, RankEntry, RankAction, ScoredNovel}
+    ├── port/{RankScoreStore, RankSnapshotRepository, RankCache}
+    └── application/{RankService, RankRefreshService, HotScoreCalculator,
+                     RankSettings, RankQuery, view/RankItemView}
 
 com.novel.infra
-├── config/{MybatisPlusConfig, RedisConfig, RabbitConfig, StorageConfig, SecurityInfraConfig}
+├── config/{MybatisPlusConfig, RedisConfig, RabbitConfig, StorageConfig, SecurityInfraConfig,
+│            RankConfig, RankProperties}
 ├── persistence/{UserRepositoryImpl, NovelRepositoryImpl, ChapterRepositoryImpl,
 │                BookshelfRepositoryImpl, RatingRepositoryImpl, ReviewRepositoryImpl,
-│                LikeRepositoryImpl, entity/*, mapper/*}
+│                LikeRepositoryImpl, RankSnapshotRepositoryImpl, entity/*, mapper/*}
 ├── security/{JwtTokenAdapter, JwtProperties, BCryptPasswordHasher,
 │             RedisTokenStore, RedisLoginAttemptLimiter, AuthRateLimitProperties}
-├── cache/{RedisNovelCache, RedisNovelViewCounter}
+├── cache/{RedisNovelCache, RedisNovelViewCounter, RedisRankScoreStore, RedisRankCache}
 ├── event/{OutboxEventPublisher, OutboxRelay, OutboxMessageSender,
 │           RabbitOutboxMessageSender, OutboxMessage, OutboxEntity, OutboxProperties}
 ├── search/{EsNovelSearchAdapter, NovelIndexDefinition, NovelIndexAdmin,
@@ -274,7 +280,7 @@ com.novel.infra
 │            SearchProperties, SearchInfraConfig}
 ├── mq/{NovelSearchSyncConsumer, NovelSearchSyncHandler, NovelSearchSyncMessage,
 │       ConsumeLogRepository, ConsumeLogEntity}
-├── job/{ViewCountFlushJob, RatingRecalcJob}
+├── job/{ViewCountFlushJob, RatingRecalcJob, RankRefreshJob}
 ├── storage/{S3StorageAdapter, StorageProperties}
 └── health/DependencyHealthChecker
 
@@ -283,8 +289,8 @@ com.novel.api
 ├── config/{OpenApiConfig, StorageBootstrap, SecurityConfig, SchedulingConfig}
 ├── controller/{AuthController, UserController, NovelController, CategoryController,
 │               BookshelfController, RatingController, ReviewController,
-│               SearchController, FileController, SystemController, dto/*}
-├── importing/{NovelImportRunner, NovelReindexRunner}   # @Profile("import" / "reindex")，跑完 System.exit
+│               SearchController, RankController, FileController, SystemController, dto/*}
+├── importing/{NovelImportRunner, NovelReindexRunner, RankRefreshRunner}   # @Profile("import" / "reindex" / "rank")，跑完 System.exit
 ├── security/{JwtAuthenticationFilter, RestAuthenticationEntryPoint, RestAccessDeniedHandler,
 │             SecurityResponses, LoginUser, SecurityUtils}
 └── web/{TraceIdFilter, ResponseTraceAdvice, GlobalExceptionHandler}
@@ -295,6 +301,13 @@ com.novel.api
 **搜索的端口倒置**：`NovelSearchPort`（查/建议/写/删）与 `NovelEventPublisher`（"这本书变了"）定义在 core，
 ES 的 DSL、索引名、别名切换、Outbox 表全在 infra。core 里没有一行知道"Elasticsearch"这个词，
 `SearchUnavailableException` 是唯一的技术失败出口，由应用服务翻译成业务码 `10601`。
+
+**榜单的端口倒置**：`RankScoreStore`（记一次行为）、`RankSnapshotRepository`（读写快照）、`RankCache`（读缓存）
+定义在 core，ZSET 的 key、Lua 脚本、`novel_rank` 的 SQL 全在 infra。core 里没有一行知道"Redis"或"ZSET"这个词。
+
+> 榜单**故意不走 MQ**。理由写在 `RankScoreStore` 的注释里：它是近似指标，丢一次行为不影响正确性；
+> 而阅读是最频繁的写，每读一次就往 outbox 写一行，等于用"不丢事件"的代价换一个本来就允许有误差的数字。
+> 于是 `q.novel.rank.agg` 到 M5 结束仍然只有拓扑，留给 M6 社区热帖。
 
 `JwtAuthenticationFilter` **不带 `@Component`**，由 `SecurityConfig` 手动 new 进过滤器链 —— 标了 `@Component` 会被 Spring Boot 当普通 Servlet Filter 再注册一次，导致每个请求执行两遍。
 
@@ -342,7 +355,8 @@ Client
 
 > 现状：**M4 起 `q.novel.search.sync` 已接通**——生产者是 `OutboxRelay`（轮询投递，等 broker 确认），
 > 消费者是 `NovelSearchSyncConsumer`（手动 ack，失败 3 次退避后进 `q.novel.dead`）。
-> `q.novel.rank.agg` / `q.novel.stat.agg` 仍然只有拓扑，留给 M5/M6。
+> `q.novel.rank.agg` / `q.novel.stat.agg` 仍然只有拓扑。**M5 的榜单没有用 `q.novel.rank.agg`**（见 §2.4 末尾），
+> 两个队列留到 M6 社区热帖。
 >
 > 事件类型即路由键：`novel.search.created` / `novel.search.updated` / `novel.search.deleted`，
 > 都落在 `novel.search.#` 下。以后加榜单同步时用 `novel.rank.#` 区分，不必改交换机。
@@ -358,6 +372,9 @@ Client
 | `novel:chapter:text:{chapterId}` | String | 2h | 章节正文缓存；`chapter_content` 是 MEDIUMTEXT，命中最省事 |
 | `novel:categories` | String(JSON) | 10m | 分类树，读多写零；导入完成时主动失效 |
 | `novel:view:delta` | Hash(field=novelId) | 无 | 阅读数增量，`ViewCountFlushJob` 每 60s 取出并 `HINCRBY` 回库 |
+| `rank:novel:{period}:{bucket}` | ZSET(member=novelId) | 日 3d / 周 4w / 月 100d | 榜单实时层，行为发生时 `ZINCRBY`；总榜不在这里（读库里的累计列） |
+| `rank:seen:{yyyyMMdd}` | Hash | 3d | 阅读去重，field = `{novelId}` + 竖线 + `u:{userId}` 或 `ip:{addr}`；一个日 Hash 而不是每人一个 key |
+| `rank:cache:{period}:{bucket}` | String(JSON) | 5m | 榜单读缓存，结算替换快照后主动删；key 带日期所以跨天自动失配 |
 
 > 小说详情**不缓存**：主键查询 1ms，为它维护失效逻辑是负优化。缓存只留收益明确的两处（正文、分类）与一个写放大点（阅读数）。
 
@@ -434,8 +451,13 @@ Client
 `retry-delays-ms`(1000,2000,4000) / `keep-indexes`(2)；`novel.outbox.enabled`(true) / `poll-interval-ms`(1000) /
 `batch-size`(100) / `max-attempts`(6) / `confirm-timeout-ms`(3000)。
 
-> `spring.task.scheduling.pool.size` 设为 **3**：默认只有 1 个线程，凌晨重建会把阅读数落库和 Outbox 投递一起卡住。
->
+> `spring.task.scheduling.pool.size` 设为 **5**：默认只有 1 个线程，凌晨重建会把阅读数落库、Outbox 投递、
+> 榜单结算一起卡住。现在有 5 个 `@Scheduled` 任务，池子必须至少一样大。
+
+> 榜单：`novel.rank.enabled`(true) / `refresh-cron`(`0 */10 * * * ?`) / `snapshot-size`(200) / `cache-ttl`(5m) /
+> `view-weight`(1) / `favorite-weight`(3) / `review-weight`(2) / `decay-exponent`(0.5) / `decay-offset-days`(2)。
+> 权重只有这一处：实时层加权和总榜算分都从这里读，改一处两边一起变。
+
 > `import` profile 关掉 `novel.search.enabled` 与 `novel.outbox.enabled`：导入进程只写库，
 > 不建索引也不投递（短命进程等不到 broker 确认就退出了）。留库里的待投递行由常驻服务补发。
 
@@ -457,8 +479,11 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
 # 手动重建搜索索引（不起 Web；写新索引 → 刷新 → 切别名 → 删旧索引）
 java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=reindex
 
+# 手动结算榜单（不起 Web；日/周/月/总四个周期各算一遍后退出）
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=rank
+
 # 测试
-mvn test                                  # 105 个用例，含 Testcontainers（需 Docker）
+mvn test                                  # 171 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
 mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
 mvn test -Dtest=AuthFlowIntegrationTest   # 认证链路端到端
@@ -471,6 +496,9 @@ mvn test -Dtest=SearchFlowIntegrationTest  # 导入→投递→可搜、评分�
 mvn test -Dtest=OutboxRelayTest            # 投递退避与"放弃"状态流转
 mvn test -Dtest=NovelSearchSyncHandlerTest # 消费幂等/重试/毒消息
 mvn test -Dtest=SearchQueryTest            # 搜索入参边界
+mvn test -Dtest=RankPeriodTest             # 榜单周期归属，含 ISO 周跨年
+mvn test -Dtest=HotScoreCalculatorTest     # 热度公式边界（负计数、时钟回拨、除零）
+mvn test -Dtest=RankFlowIntegrationTest    # 行为→结算→读榜端到端
 ```
 
 自检入口：`/swagger-ui.html`、`/api/v1/system/ping`、`/api/v1/system/dependencies`（五项中间件实测）、`/actuator/health`。
@@ -482,7 +510,7 @@ mvn test -Dtest=SearchQueryTest            # 搜索入参边界
 - [x] **M2 阅读**：TXT 解析与批量导入（幂等）、小说列表/详情、目录分页、正文 + Redis 缓存、阅读数写缓冲、书架（收藏 + 进度 + 有新章标记）
 - [x] **M3 评分书评**：1-5 星一人一票（增量聚合 + 每日对账自愈）、书级评论区（最热/最新、软删除、越权拦截）、楼中楼两层、点赞幂等
 - [x] **M4 搜索**：ES 索引 + 别名 + IK、Outbox 增量同步（投递确认 / 手动 ack / 死信）、手写 DSL 查询（高亮 / 筛选 / 五种排序）、搜索建议、每日全量重建（零停机切别名、写入失败不切换）
-- [ ] M5 榜单
+- [x] **M5 榜单**：日/周/月/总四榜（ISO 周对齐）、Redis ZSET 实时层 + 按用户/IP 按天去重、10 分钟结算快照（整份替换）、读缓存、`hot_score` 回写（不进索引，等每日重建）
 - [ ] M6 社区
 - [ ] M7 工程收尾（压测 / CI / 架构图）
 
@@ -498,4 +526,6 @@ mvn test -Dtest=SearchQueryTest            # 搜索入参边界
 6. **`size` 上限 50**：新分页接口必须用 `PageQuery`，不得放开限制。
 7. **不要主动拉新的中间件 SDK**：MinIO 走 S3 协议（AWS SDK），ES 客户端版本以 Boot BOM 为准。
 8. **搜索索引写入必须带版本号**：`novel.version` 是唯一的顺序依据，缺了它，迟到的旧消息会把新内容盖回去且没有任何报错。
-9. **索引只当副本**：任何"读自己刚写的数据"都走 MySQL；ES 挂了搜索返回 `10601`，其余接口不受影响。
+9. **新增功能先写测试再写实现**：每个红绿循环的红灯必须是"测试跑起来并失败"（先建空壳让编译通过），
+   不能是编译不过；每完成一个模块只跑该模块的相关测试，全量 `mvn test` 留到功能收尾。
+10. **索引只当副本**：任何"读自己刚写的数据"都走 MySQL；ES 挂了搜索返回 `10601`，其余接口不受影响。

@@ -6,6 +6,8 @@ import com.novel.common.result.ResultCode;
 import com.novel.core.novel.domain.Novel;
 import com.novel.core.novel.port.ChapterRepository;
 import com.novel.core.novel.port.NovelRepository;
+import com.novel.core.rank.domain.RankAction;
+import com.novel.core.rank.port.RankScoreStore;
 import com.novel.core.reading.application.view.BookshelfView;
 import com.novel.core.reading.domain.BookshelfItem;
 import com.novel.core.reading.port.BookshelfRepository;
@@ -36,6 +38,7 @@ public class BookshelfService {
     private final NovelRepository novelRepository;
     private final ChapterRepository chapterRepository;
     private final UserRepository userRepository;
+    private final RankScoreStore rankScoreStore;
 
     @Transactional
     public void add(long userId, long novelId) {
@@ -48,6 +51,9 @@ public class BookshelfService {
         novelRepository.addFavoriteCount(novel.id(), 1);
         // 个人主页要显示"书架里有几本"，和 review_count 一样直接维护
         userRepository.addBookshelfCount(userId, 1);
+        // 只在这条真正插入成功的分支里记分：上面提前 return 的幂等分支不能加，
+        // 否则前端把"加入书架"重试几次，热度就自己涨上去了
+        rankScoreStore.recordAction(novelId, RankAction.FAVORITE, 1);
         log.info("加入书架 userId={} novelId={}", userId, novelId);
     }
 
@@ -59,6 +65,8 @@ public class BookshelfService {
         bookshelfRepository.delete(userId, novelId);
         novelRepository.addFavoriteCount(novelId, -1);
         userRepository.addBookshelfCount(userId, -1);
+        // 取消收藏要扣回去：只加不减的话，"收藏→取消→再收藏"就是一个免费的刷分循环
+        rankScoreStore.recordAction(novelId, RankAction.FAVORITE, -1);
     }
 
     public PageResult<BookshelfView> list(long userId, int page, int size) {

@@ -15,11 +15,13 @@ spring:
     timeout-per-shutdown-phase: 20s
 
   # 定时任务线程池。默认只有 1 个线程：一旦凌晨的全量重建占着线程，
-  # 阅读数落库和 Outbox 投递就全被卡住。三个任务各要一个线程。
+  # 阅读数落库和 Outbox 投递就全被卡住。现在有 5 个任务（阅读数落库 / 评分对账 /
+  # 索引重建 / Outbox 投递 / 榜单结算），池子必须至少一样大，否则 02:00 那几分钟
+  # Outbox 会被排在重建后面，"写完 2 秒内可搜到"这条直接不成立。
   task:
     scheduling:
       pool:
-        size: 3
+        size: 5
 
   # 本地私密配置覆盖层：文件存在就加载，不存在也不报错。
   # 数据库密码这类东西放 application-local.yml（已被 .gitignore 忽略），永远不要写进本文件。
@@ -147,6 +149,23 @@ novel:
     retry-delays-ms: 1000,2000,4000
     # 重建后保留的索引份数（含新的），留一份旧的用于回滚
     keep-indexes: 2
+
+  rank:
+    enabled: true
+    # 结算频率。刷新不会让 novel_rank 变大：每次都是先删后插整份替换，
+    # 所以调快只是多几次写入，不会堆历史。10 分钟一次，日榜最多滞后 10 分钟。
+    refresh-cron: "0 */10 * * * ?"
+    # 每个周期写多少行。读接口 size 上限 50，200 行够翻四页。
+    snapshot-size: 200
+    # 读缓存；配 0 关掉，用于排查"到底是缓存还是库返回的旧数据"
+    cache-ttl: 5m
+    # 行为权重。实时层累加和总榜算分必须用同一份，改这里就两边一起变。
+    view-weight: 1
+    favorite-weight: 3
+    review-weight: 2
+    # 总榜的时间衰减：score = log10(1+raw) / (距最近更新天数 + 偏移)^指数
+    decay-exponent: 0.5
+    decay-offset-days: 2
 
   outbox:
     enabled: true

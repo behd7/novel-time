@@ -68,6 +68,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/novels/**", "/api/v1/categories").permitAll()
                         // 搜索同理：它是找书的第一入口，要求登录等于把新用户挡在门外
                         .requestMatchers(HttpMethod.GET, "/api/v1/search/**").permitAll()
+                        // 榜单也是公开入口：它读的是快照，和阅读接口同级别的曝光面
+                        .requestMatchers(HttpMethod.GET, "/api/v1/ranks").permitAll()
                         // 书评的楼中楼是独立路径，不能靠 /novels/** 覆盖
                         .requestMatchers(HttpMethod.GET, "/api/v1/reviews/*/replies").permitAll()
                         // 顺序要点：更精确的 /users/me 必须排在 /users/* 前面

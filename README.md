@@ -132,7 +132,7 @@ curl http://127.0.0.1:8080/api/v1/users/me -H "Authorization: Bearer $ACCESS_TOK
 ### 测试
 
 ```bash
-mvn test                                    # 77 个用例（含 Testcontainers，需要 Docker）
+mvn test                                    # 171 个用例（含 Testcontainers，需要 Docker）
 mvn test -Dtest=ArchitectureTest            # 只跑架构约束
 mvn test -Dtest=AuthFlowIntegrationTest     # 认证链路端到端（起 MySQL + Redis 容器）
 mvn test -Dtest=AuthServiceTest             # 认证业务逻辑单元测试（纯 Mock，1 秒内跑完）
@@ -211,12 +211,42 @@ MySQL 是唯一真相，ES 只是可重建的索引副本。写路径只有一�
 - 深分页窗口 `page*size ≤ 1000`，超过返回 400：搜索翻到第 20 页以后，代价随页码线性上涨
 - ES 不可用时搜索返回 `10601`，列表/详情/书架不受影响
 - 索引映射是 `dynamic: strict`：文档出现未声明字段会直接写失败，逼着 `NovelDoc` 和映射同步改
-- 阅读数是**快照**：只在导入、评分、对账、重建时写进索引，所以结果里的阅读数和"最热"排序最多滞后一天（M5 接入真实热度分后由它接管）
+- 阅读数与热度分都是**快照**：只在导入、评分、对账、重建时写进索引；榜单每 10 分钟回写的 `hot_score` 不发同步事件，"最热"排序最多滞后到次日重建
 
 手动重建索引（写 `novel_v2` → 刷新 → 原子切别名 → 删旧索引，期间搜索不断服）：
 
 ```bash
 java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=reindex
+```
+
+## 榜单
+
+四张榜共用一套公式：`raw = 阅读×1 + 收藏×3 + 书评×2`，`score = log10(1 + raw)`；
+总榜再叠一层时间衰减，防止五年前完结的老书永远压在首页。
+
+```
+详情页/收藏/书评 ─(就地 ZINCRBY)→ rank:novel:{period}:{bucket}   ← 日 / 周 / 月
+                                          │ 每 10 分钟结算
+                                          ├→ novel_rank 快照 + 清读缓存
+库里的累计列 ────(全表扫描)───────────────┘→ novel.hot_score（等每日重建进索引）
+```
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/api/v1/ranks?period=daily` | 否 | 日/周/月/总榜；返回名次、热度分与小说卡片 |
+
+- `period` 取 `daily` / `weekly` / `monthly` / `all`；周按 ISO 8601（周一为第一天），跨年周不会串桶
+- 阅读按「同一个人同一天同一本书」去重，匿名按 IP：一次 Lua 完成判重 + 三桶累加
+- 收藏与书评**双向记账**（取消时 -3 / -2），否则「收藏→取消→再收藏」就是免费刷分
+- 结算每 10 分钟一轮，`novel_rank` 每次整份替换（先删后插），表不会随时间膨胀
+- 总榜不读 ZSET：`rank:novel:all` 只能从上线那天开始累加，M2 导入的书在它眼里是 0 分
+- `hot_score` 回写**不自增 `version`**：它不是内容变更，索引等每日 02:00 重建刷新
+- 榜单读的是快照，最多滞后一个结算周期；Redis 挂了榜单降级为空，阅读与搜索不受影响
+
+手动结算一次（不起 Web，跑完退出）：
+
+```bash
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=rank
 ```
 
 ## 进度
@@ -226,7 +256,7 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active
 - [x] **M2 阅读**：TXT 解析与幂等导入、小说列表/详情、目录、正文 + 缓存、阅读数写缓冲、书架
 - [x] **M3 评分书评**：1-5 星一人一票、平均分增量维护 + 每日对账、书级评论区（最热/最新）、楼中楼、点赞幂等
 - [x] **M4 搜索**：ES 索引 + 别名 + IK、Outbox 增量同步（投递确认 / 手动 ack / 死信）、高亮与筛选排序、搜索建议、每日全量重建
-- [ ] M5 榜单
+- [x] **M5 榜单**：日/周/月/总四榜、Redis ZSET 实时层（按人按天去重）、10 分钟结算快照、读缓存、`hot_score` 回写
 - [ ] M6 社区
 - [ ] M7 工程收尾（压测 / CI / 架构图）
 

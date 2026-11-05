@@ -1,0 +1,25 @@
+# 手动结算榜单 profile：跑完 RankRefreshRunner 自动退出
+#
+#   java -jar novel-api.jar --spring.profiles.active=rank
+#
+# 结算是一次全表扫描 + 四个周期的快照替换，不需要 Web 容器，也不需要消费消息。
+spring:
+  main:
+    web-application-type: none
+  rabbitmq:
+    listener:
+      simple:
+        # 结算是短命进程，不消费消息：重放进来的索引事件交给常驻服务
+        auto-startup: false
+
+novel:
+  outbox:
+    # 也不投递：确认还没回来 JVM 就退出了，容易留下"发了但状态没改"的行
+    enabled: false
+  search:
+    # 不初始化索引：结算只读库里的累计列，跟 ES 无关，别为它多等一次连接超时
+    enabled: false
+
+logging:
+  level:
+    com.novel: info

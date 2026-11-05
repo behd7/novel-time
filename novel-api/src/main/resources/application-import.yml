@@ -14,6 +14,10 @@ spring:
         auto-startup: false
 
 novel:
+  rank:
+    # 短命进程不结算榜单：跑一轮就退出，结算结果还没写稳就被 System.exit 收掉，
+    # 白白占用一次全表扫描。常驻服务下一轮会算。
+    enabled: false
   import:
     # 默认读仓库里的样例，可用 --novel.import.dir=... 或 NOVEL_IMPORT_DIR 覆盖
     dir: ${NOVEL_IMPORT_DIR:deploy/samples}

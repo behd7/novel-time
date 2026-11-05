@@ -4,6 +4,8 @@ import com.novel.common.exception.BizException;
 import com.novel.common.result.PageResult;
 import com.novel.common.result.ResultCode;
 import com.novel.core.novel.port.NovelRepository;
+import com.novel.core.rank.domain.RankAction;
+import com.novel.core.rank.port.RankScoreStore;
 import com.novel.core.review.application.view.ReviewReplyView;
 import com.novel.core.review.application.view.ReviewView;
 import com.novel.core.review.domain.LikeTargetType;
@@ -52,6 +54,7 @@ public class ReviewService {
     private final UserRepository userRepository;
     private final LikeRepository likeRepository;
     private final RatingService ratingService;
+    private final RankScoreStore rankScoreStore;
 
     // ------------------------------------------------------------------ 书评
 
@@ -91,6 +94,7 @@ public class ReviewService {
         long reviewId = reviewRepository.create(new Review(null, novelId, userId, text, score,
                 0, 0, LocalDateTime.now()));
         userRepository.addReviewCount(userId, 1);
+        rankScoreStore.recordAction(novelId, RankAction.REVIEW, 1);
         log.info("新增书评 reviewId={} novelId={} userId={}", reviewId, novelId, userId);
 
         return loadReviewView(reviewId, userId);
@@ -105,6 +109,7 @@ public class ReviewService {
         }
         reviewRepository.softDelete(reviewId);
         userRepository.addReviewCount(userId, -1);
+        rankScoreStore.recordAction(review.novelId(), RankAction.REVIEW, -1);
         log.info("删除书评 reviewId={} userId={}", reviewId, userId);
     }
 

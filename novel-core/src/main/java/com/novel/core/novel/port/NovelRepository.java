@@ -5,9 +5,11 @@ import com.novel.core.novel.application.NovelQuery;
 import com.novel.core.novel.domain.Category;
 import com.novel.core.novel.domain.Novel;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -67,6 +69,18 @@ public interface NovelRepository {
 
     /** 对账用：用明细重算出来的值直接覆盖。 */
     void setRatingStats(long novelId, long sum, int count);
+
+    /**
+     * 榜单结算回写热度分。
+     *
+     * <p>这是<b>唯一一条刻意不自增 {@code version} 的写路径</b>：热度分不是内容变更，
+     * 它会随每次结算变化，但索引里的 {@code hotScore} 只在全量重建时刷新。
+     * 一旦让它自增版本号，每次结算都得发一遍同步事件，搜索同步就成了榜单的从属，
+     * 而重建本来就是全量的，等它刷新就够了。
+     *
+     * @param scores novelId → 热度分，空 map 应当直接返回
+     */
+    void updateHotScores(Map<Long, BigDecimal> scores);
 
     /**
      * 新建小说用的入参。

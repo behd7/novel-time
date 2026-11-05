@@ -7,6 +7,8 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.math.BigDecimal;
+
 @Mapper
 public interface NovelMapper extends BaseMapper<NovelEntity> {
 
@@ -73,4 +75,14 @@ public interface NovelMapper extends BaseMapper<NovelEntity> {
              WHERE id = #{id}
             """)
     int setRatingStats(@Param("id") long id, @Param("sum") long sum, @Param("count") int count);
+
+    /**
+     * 榜单结算回写热度分。
+     *
+     * <p>唯一一条<b>不自增 {@code version}</b> 的写路径。热度分每次结算都在变，
+     * 如果它也自增版本号，每次都得跟着发一条索引同步事件，搜索同步就成了榜单的从属；
+     * 而索引本来就是每日全量重建的，等那一轮刷新就够了。
+     */
+    @Update("UPDATE novel SET hot_score = #{score} WHERE id = #{id}")
+    int updateHotScore(@Param("id") long id, @Param("score") BigDecimal score);
 }

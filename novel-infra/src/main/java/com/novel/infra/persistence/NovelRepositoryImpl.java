@@ -16,9 +16,11 @@ import com.novel.infra.persistence.mapper.NovelMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /** 小说仓储实现。Entity ↔ Domain 的翻译都在这里，core 看不见 MyBatis。 */
@@ -160,6 +162,16 @@ public class NovelRepositoryImpl implements NovelRepository {
     @Override
     public void setRatingStats(long novelId, long sum, int count) {
         novelMapper.setRatingStats(novelId, sum, count);
+    }
+
+    @Override
+    public void updateHotScores(Map<Long, BigDecimal> scores) {
+        if (scores == null || scores.isEmpty()) {
+            return;
+        }
+        // 逐条更新而不是拼一条 CASE WHEN：调用方按批(200 行)传进来，行数有界，
+        // 拼超长 SQL 反而要先操心参数上限。书量真涨到十万级再换成批量语句。
+        scores.forEach(novelMapper::updateHotScore);
     }
 
     private Novel toDomain(NovelEntity e) {

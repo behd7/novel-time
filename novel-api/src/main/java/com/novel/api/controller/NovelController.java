@@ -10,9 +10,11 @@ import com.novel.core.novel.application.view.ChapterSummaryView;
 import com.novel.core.novel.application.view.ChapterView;
 import com.novel.core.novel.application.view.NovelDetailView;
 import com.novel.core.novel.application.view.NovelSummaryView;
+import com.novel.api.security.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -46,10 +48,23 @@ public class NovelController {
         return Result.ok(novelService.list(query));
     }
 
-    @Operation(summary = "小说详情", description = "每次调用会累加一次阅读数（写入 Redis，由定时任务落库）")
+    @Operation(summary = "小说详情",
+            description = "每次调用会累加一次阅读数（写入 Redis，由定时任务落库）；"
+                    + "榜单只按「同一个人同一天同一本书」计一次，匿名按 IP 去重")
     @GetMapping("/{id}")
-    public Result<NovelDetailView> detail(@PathVariable long id) {
-        return Result.ok(novelService.detail(id));
+    public Result<NovelDetailView> detail(@PathVariable long id, HttpServletRequest request) {
+        return Result.ok(novelService.detail(id, viewerKey(request)));
+    }
+
+    /**
+     * 榜单去重用的身份：登录了用用户 id，没登录用 IP。
+     *
+     * <p>没有解析 {@code X-Forwarded-For}——本项目前面没有反向代理，现在解析等于给伪造留口子。
+     * 接了网关之后再补一行，而不是提前"预防性"地信任一个可伪造的头。
+     */
+    private String viewerKey(HttpServletRequest request) {
+        Long userId = SecurityUtils.currentUserIdOrNull();
+        return userId != null ? "u:" + userId : "ip:" + request.getRemoteAddr();
     }
 
     @Operation(summary = "章节目录", description = "按 seq 升序分页")
