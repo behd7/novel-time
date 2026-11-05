@@ -3,10 +3,8 @@ package com.novel.infra.search;
 import com.novel.common.result.ResultCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.core.annotation.Order;
+import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
 /**
@@ -16,20 +14,23 @@ import org.springframework.stereotype.Component;
  * ES 没起来的时候，列表、详情、正文、书架、评分全都正常，只有搜索返回 10601。
  * 为了一个非核心依赖让整站起不来，是把可用性往下拉而不是往上抬。
  *
- * <p>{@code @Order(110)} 排在存储初始化（100）之后，纯粹是为了让启动日志的顺序稳定好读。
+ * <p>为什么是 {@link SmartLifecycle} 而不是 {@code ApplicationRunner}：监听器容器在
+ * 上下文刷新时就启动了，比 ApplicationRunner 更早。而"别名叫 {@code novel}、索引还不存在"
+ * 这个组合是危险的——消费端此时写别名，Elasticsearch 会把 {@code novel} **自动建成一个同名索引**，
+ * 之后别名永远建不起来（ES 不允许别名与索引重名），搜索只能一直返回 10601。
+ * 把初始化提到 {@code Integer.MIN_VALUE} 阶段，就能保证它先于任何消费动作完成。
  */
 @Slf4j
 @Component
-@Order(110)
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "novel.search", name = "enabled", havingValue = "true", matchIfMissing = true)
-public class NovelIndexBootstrap implements ApplicationRunner {
+public class NovelIndexBootstrap implements SmartLifecycle {
 
     private final NovelIndexAdmin indexAdmin;
-    private final SearchProperties properties;
+    private volatile boolean running;
 
     @Override
-    public void run(ApplicationArguments args) {
+    public void start() {
         try {
             indexAdmin.probeAnalyzer();
             indexAdmin.ensure();
@@ -39,6 +40,24 @@ public class NovelIndexBootstrap implements ApplicationRunner {
                     ResultCode.SEARCH_UNAVAILABLE.getMessage(),
                     e.getMessage());
             log.debug("搜索索引初始化失败详情", e);
+        } finally {
+            running = true;
         }
+    }
+
+    @Override
+    public void stop() {
+        running = false;
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running;
+    }
+
+    /** 最早启动：必须早于 Rabbit 的监听器容器，否则写别名的瞬间会把它自动建成同名索引。 */
+    @Override
+    public int getPhase() {
+        return Integer.MIN_VALUE;
     }
 }

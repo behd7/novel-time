@@ -2,6 +2,7 @@ package com.novel.core.review.application;
 
 import com.novel.common.exception.BizException;
 import com.novel.common.result.ResultCode;
+import com.novel.core.event.NovelChangeType;
 import com.novel.core.event.NovelEventPublisher;
 import com.novel.core.novel.domain.Novel;
 import com.novel.core.novel.port.NovelRepository;
@@ -20,6 +21,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
@@ -49,9 +51,17 @@ class RatingServiceTest {
 
     private RatingService ratingService;
 
-    private final Novel novel = new Novel(NOVEL_ID, "青云志", "佚名", null, 1L, 0, "简介",
-            900, 5, 10L, LocalDateTime.now(), 0, BigDecimal.ZERO, 0L, 0, 0,
-            BigDecimal.ZERO, 1L, LocalDateTime.now());
+    /** 初始状态：0 人评分、总分 0。 */
+    private final Novel novel = newNovel(0L, 0);
+
+    private Novel newNovel(long ratingSum, int ratingCount) {
+        BigDecimal avg = ratingCount == 0 ? BigDecimal.ZERO
+                : BigDecimal.valueOf(ratingSum)
+                        .divide(BigDecimal.valueOf(ratingCount), 2, java.math.RoundingMode.HALF_UP);
+        return new Novel(NOVEL_ID, "青云志", "佚名", null, 1L, 0, "简介",
+                900, 5, 10L, LocalDateTime.now(), ratingSum, ratingCount, avg, 0L, 0, 0,
+                BigDecimal.ZERO, 1L, LocalDateTime.now());
+    }
 
     @BeforeEach
     void setUp() {
@@ -96,6 +106,31 @@ class RatingServiceTest {
 
         verify(ratingRepository, never()).save(anyLong(), anyLong(), anyInt());
         verify(novelRepository, never()).addRating(anyLong(), anyLong(), anyInt());
+    }
+
+    @Test
+    @DisplayName("对账修正了聚合值：覆盖并发出事件，搜索索引不会落后一天")
+    void recalculate_publishesWhenAggregateChanged() {
+        // 明细重算出来是 3 人 12 分，而库里的聚合还是 0 人 0 分
+        when(ratingRepository.aggregate(NOVEL_ID)).thenReturn(new RatingRepository.Aggregate(12L, 3));
+        when(novelRepository.findById(NOVEL_ID)).thenReturn(Optional.of(novel));
+
+        ratingService.recalculate(NOVEL_ID);
+
+        verify(novelRepository).setRatingStats(NOVEL_ID, 12L, 3);
+        verify(eventPublisher).novelChanged(NOVEL_ID, NovelChangeType.UPDATED);
+    }
+
+    @Test
+    @DisplayName("对账值和库里一致：不写库、不发事件")
+    void recalculate_isNoOpWhenConsistent() {
+        when(ratingRepository.aggregate(NOVEL_ID)).thenReturn(new RatingRepository.Aggregate(12L, 3));
+        when(novelRepository.findById(NOVEL_ID)).thenReturn(Optional.of(newNovel(12L, 3)));
+
+        ratingService.recalculate(NOVEL_ID);
+
+        verify(novelRepository, never()).setRatingStats(anyLong(), anyLong(), anyInt());
+        verify(eventPublisher, never()).novelChanged(anyLong(), any());
     }
 
     @Test

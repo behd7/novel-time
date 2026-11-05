@@ -65,6 +65,15 @@ public class NovelIndexAdmin {
             log.info("搜索索引已就绪 alias={} index={}", properties.getAlias(), currentIndexName());
             return;
         }
+        // 走到这里说明别名不存在。若此时"同名索引"存在，就是死局：ES 不允许别名与索引重名，
+        // 只能人工清理。判断顺序不能反：{@code exists(别名)} 对别名也返回 true，
+        // 先判索引会把"别名正常存在"误判成冲突。
+        if (indexExists(properties.getAlias())) {
+            throw new IllegalStateException(
+                    "存在与别名同名的物理索引 [" + properties.getAlias() + "]，Elasticsearch 不允许别名与索引重名。"
+                            + "通常是别名缺失时先写入了数据、被自动建成了同名索引。"
+                            + "删掉它（DELETE /" + properties.getAlias() + "）后重启即可，MySQL 里没有丢任何东西。");
+        }
         String existing = currentIndexName();
         String target = existing != null ? existing : properties.getIndexPrefix() + "_v1";
         if (!indexExists(target)) {
@@ -74,10 +83,22 @@ public class NovelIndexAdmin {
         log.info("搜索索引初始化完成 alias={} index={}", properties.getAlias(), target);
     }
 
+    /**
+     * 下一个可用的物理索引名。
+     *
+     * <p>不能只按"别名当前指向的版本 +1"算：一次失败的重建可能留下一个没挂别名的孤儿索引，
+     * 再算出同一个名字就会撞上 resource_already_exists，重建从此天天失败。
+     * 所以这里往后找第一个不存在的名字，孤儿索引自然被跳过。
+     */
     public String nextIndexName() throws IOException {
         String current = currentIndexName();
         int version = current == null ? 0 : parseVersion(current);
-        return properties.getIndexPrefix() + "_v" + (version + 1);
+        String candidate;
+        do {
+            version++;
+            candidate = properties.getIndexPrefix() + "_v" + version;
+        } while (indexExists(candidate));
+        return candidate;
     }
 
     public void createIndex(String index) throws IOException {

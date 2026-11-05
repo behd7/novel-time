@@ -169,6 +169,7 @@ public class NovelRepositoryImpl implements NovelRepository {
                 e.getWordCount() == null ? 0 : e.getWordCount(),
                 e.getChapterCount() == null ? 0 : e.getChapterCount(),
                 e.getLatestChapterId(), e.getLatestUpdateAt(),
+                e.getRatingSum() == null ? 0L : e.getRatingSum(),
                 e.getRatingCount() == null ? 0 : e.getRatingCount(),
                 e.getAvgRating(),
                 e.getViewCount() == null ? 0L : e.getViewCount(),

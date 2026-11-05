@@ -213,7 +213,11 @@ public class EsNovelSearchAdapter implements NovelSearchPort {
                     .field(NovelIndexDefinition.F_LATEST_UPDATE).order(SortOrder.Desc)));
             case HOT -> {
                 // 热度分在 M5 之前恒为 0，所以次级排序用阅读数兜住，
-                // 等榜单任务接上以后不用改代码，排序自然切换到真实热度
+                // 等榜单任务接上以后不用改代码，排序自然切换到真实热度。
+                //
+                // 注意 viewCount 是"快照"而不是实时值：它只在导入、评分、每日重建时写进文档，
+                // 阅读数落库（每 60 秒）不会触发事件。所以"最热"排序最多滞后一天，
+                // 这个取舍是刻意的——为了一个近似指标每分钟重写一遍索引不划算。
                 builder.sort(s -> s.field(f -> f
                         .field(NovelIndexDefinition.F_HOT_SCORE).order(SortOrder.Desc)));
                 builder.sort(s -> s.field(f -> f

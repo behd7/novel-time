@@ -7,7 +7,6 @@ import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkOperation;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import co.elastic.clients.elasticsearch.indices.GetIndexResponse;
-import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import com.novel.core.novel.domain.Novel;
 import com.novel.core.novel.port.NovelRepository;
 import com.novel.core.search.domain.NovelDoc;
@@ -77,27 +76,42 @@ public class NovelIndexRebuildJob {
             log.warn("已有重建任务在执行，本次跳过");
             return 0;
         }
-        long watermark = currentWatermark();
+        // 水位要在扫描之前取：之后登记的变更才需要收尾补写
+        long watermark = outboxMapper.selectMaxId();
         String target = null;
+        int indexed;
+        int repaired;
         try {
             target = indexAdmin.nextIndexName();
             indexAdmin.createIndex(target);
-            int indexed = bulkIndexAll(target);
-            int repaired = repairTail(target, watermark);
+            indexed = bulkIndexAll(target);
+            repaired = repairTail(target, watermark);
             // 不刷新的话，切完别名后最多 1 秒内搜不到新写入的文档
             indexAdmin.refresh(target);
-            indexAdmin.switchAlias(target);
-            cleanupOldIndexes(target);
-            log.info("搜索索引重建完成 index={} 写入={} 补写={}", target, indexed, repaired);
-            return indexed + repaired;
         } catch (IOException | RuntimeException e) {
+            // 写入阶段只要有一处失败就整体放弃：别名还没切，线上仍是旧索引，
+            // 删掉半成品即可。绝不能在"新索引缺文档"的状态下切过去——
+            // 旧索引过几轮就被清掉，缺的那本书会一直缺到下次重建。
             if (target != null) {
                 indexAdmin.deleteIndexQuietly(target);
             }
             throw e;
-        } finally {
-            running.set(false);
         }
+
+        try {
+            indexAdmin.switchAlias(target);
+        } catch (IOException | RuntimeException e) {
+            if (isServing(target)) {
+                // 服务端其实已经切过去了，只是响应超时/连接断了。这时候删 target 等于把线上索引删了
+                log.warn("切换别名返回异常，但别名已指向 {}，按成功处理：{}", target, e.getMessage());
+            } else {
+                indexAdmin.deleteIndexQuietly(target);
+                throw e;
+            }
+        }
+        cleanupOldIndexes(target);
+        log.info("搜索索引重建完成 index={} 写入={} 补写={}", target, indexed, repaired);
+        return indexed + repaired;
     }
 
     private int bulkIndexAll(String target) throws IOException {
@@ -122,7 +136,11 @@ public class NovelIndexRebuildJob {
             }
             BulkResponse response = client.bulk(BulkRequest.of(b -> b.operations(operations)));
             if (response.errors()) {
-                logBulkErrors(response);
+                int failed = logBulkErrors(response);
+                // 只要有一篇没写进去，新索引就是"缺数据"的。这时候切过去，
+                // 旧索引过几轮会被清理，缺的那本书就再也补不回来了。
+                throw new IllegalStateException(
+                        "批量写入失败 " + failed + " 条（本批 " + operations.size() + " 条），放弃本次重建");
             }
             total += operations.size();
             lastId = batch.get(batch.size() - 1).id();
@@ -130,38 +148,35 @@ public class NovelIndexRebuildJob {
         return total;
     }
 
-    /** 读水位。读不到就退化成 0，补写范围变大但不会漏。 */
-    private long currentWatermark() {
-        try {
-            return outboxMapper.selectMaxId();
-        } catch (RuntimeException e) {
-            log.warn("读取 outbox 水位失败，本次重建跳过收尾补写：{}", e.getMessage());
-            return Long.MAX_VALUE;
-        }
-    }
-
+    /**
+     * 补写重建期间发生的变更。
+     *
+     * <p>这里任何一步失败都向上抛：补写是"新索引不丢更新"的保证，
+     * 补写失败还照常切别名，等于把旧索引里已经有的数据丢掉。
+     */
     private int repairTail(String target, long watermark) {
-        List<Long> changed;
-        try {
-            changed = outboxMapper.findAggregateIdsChangedAfter(watermark);
-        } catch (RuntimeException e) {
-            log.warn("重建收尾补写查询失败，跳过：{}", e.getMessage());
-            return 0;
-        }
+        List<Long> changed = outboxMapper.findAggregateIdsChangedAfter(watermark);
         int repaired = 0;
         for (Long novelId : changed) {
             Optional<Novel> novel = novelRepository.findById(novelId);
             if (novel.isEmpty()) {
                 continue;
             }
-            try {
-                adapter.upsertInto(target, assembler.assemble(novel.get()), novel.get().version());
-                repaired++;
-            } catch (RuntimeException e) {
-                log.warn("重建补写失败 novelId={}：{}", novelId, e.getMessage());
-            }
+            adapter.upsertInto(target, assembler.assemble(novel.get()), novel.get().version());
+            repaired++;
         }
         return repaired;
+    }
+
+    /** 切别名抛异常时用来判断"到底切没切"：抛异常不等于没生效，可能是客户端超时。 */
+    private boolean isServing(String target) {
+        try {
+            return target.equals(indexAdmin.currentIndexName());
+        } catch (IOException | RuntimeException e) {
+            // 读不到别名（集群不可用）时保守处理：不删，交给下一次重建的孤儿索引跳过逻辑
+            log.warn("无法确认别名当前指向，保守起见不删除 {}", target);
+            return true;
+        }
     }
 
     private void cleanupOldIndexes(String keepIndex) {
@@ -177,11 +192,9 @@ public class NovelIndexRebuildJob {
                     indexAdmin.deleteIndexQuietly(name);
                 }
             }
-        } catch (ElasticsearchException e) {
-            if (e.status() != 404) {
-                log.warn("清理旧索引失败：{}", e.getMessage());
-            }
-        } catch (IOException e) {
+        } catch (Exception e) {
+            // 清理是收尾动作：别名已经切过去了，这里失败最多留下一个旧索引，
+            // 不该把一次成功的重建判成失败（判成失败会诱发重试，反而多建一个索引）
             log.warn("清理旧索引失败：{}", e.getMessage());
         }
     }
@@ -198,12 +211,15 @@ public class NovelIndexRebuildJob {
         }
     }
 
-    private void logBulkErrors(BulkResponse response) {
+    private int logBulkErrors(BulkResponse response) {
+        int failed = 0;
         for (BulkResponseItem item : response.items()) {
             if (item.error() != null) {
-                log.warn("批量写入部分失败 id={} type={} reason={}",
-                        item.id(), item.error().type(), item.error().reason());
+                failed++;
+                log.warn("批量写入失败 id={} status={} type={} reason={}",
+                        item.id(), item.status(), item.error().type(), item.error().reason());
             }
         }
+        return failed;
     }
 }

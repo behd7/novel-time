@@ -373,7 +373,7 @@ Client
 |---|---|---|
 | 别名 | `novel` | 读写都走它，重建时原子切换 |
 | 物理索引 | `novel_v1`、`novel_v2`… | 字段映射建好不能改，换分词器只能重建 |
-| 重建 | 每天 02:00（`novel.search.rebuild-cron`） | 写 `v{N+1}` → 刷新 → 切别名 → 删旧索引（保留 `keep-indexes` 份） |
+| 重建 | 每天 02:00（`novel.search.rebuild-cron`） | 写 `v{N+1}` → 刷新 → 切别名 → 删旧索引（保留 `keep-indexes` 份）；**任一篇写入失败就整体放弃，不切别名** |
 | 手动重建 | `--spring.profiles.active=reindex` | 运维动作，不暴露成 HTTP 接口 |
 
 - 文档字段：`title` / `authorName` / `intro`（text，IK）、`titleSuggest`（completion）、`categoryId` / `status` / `wordCount` / `avgRating` / `viewCount` / `hotScore` / `latestUpdateAt`。
@@ -381,6 +381,10 @@ Client
 - 查询用 `multi_match`（`title^3, authorName^2, intro`）而不是 `query_string`，避免用户输入被当成查询语法。
 - 深分页窗口 `page*size ≤ 1000`，超过回 400；不提供游标翻页（接口要返回 total 与页码）。
 - IK 插件烤在 `deploy/es/Dockerfile` 里（官方镜像不带）。没有插件的机器把 `novel.search.analyzer` 配成 `standard`，不自动降级。
+- 映射是 `dynamic: strict`：给 `NovelDoc` 加字段却忘了同步映射时，写入会直接失败并进死信，而不是让 ES 猜一个类型。
+- 重建的失败语义：写入/补写阶段任何失败都丢弃新索引、**不切别名**（旧索引继续服务）；切别名超时要先确认别名指向，已在服务的新索引不许删。
+- 索引初始化用 `SmartLifecycle`（`phase = Integer.MIN_VALUE`），必须早于 Rabbit 监听器：别名缺失时任何写入都会让 ES 自动建出**同名索引**，之后别名再也建不起来。真遇到了删掉同名索引重启即可。
+- `viewCount` 是**快照**：只在导入、评分、对账、重建时写入，阅读数按分钟落库不触发同步，所以"最热"排序与结果里的阅读数最多滞后一天，M5 接入真实 `hotScore` 后由它接管。
 
 ### 2.7 数据模型（21 张表）
 
@@ -454,7 +458,7 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
 java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=reindex
 
 # 测试
-mvn test                                  # 100 个用例，含 Testcontainers（需 Docker）
+mvn test                                  # 105 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
 mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
 mvn test -Dtest=AuthFlowIntegrationTest   # 认证链路端到端
@@ -477,7 +481,7 @@ mvn test -Dtest=SearchQueryTest            # 搜索入参边界
 - [x] **M1 用户与认证**：注册/登录/刷新/登出、JWT 双令牌 + Redis 白名单、Spring Security 过滤器链、401/403 统一响应、登录限流、个人资料读写、他人主页免登录
 - [x] **M2 阅读**：TXT 解析与批量导入（幂等）、小说列表/详情、目录分页、正文 + Redis 缓存、阅读数写缓冲、书架（收藏 + 进度 + 有新章标记）
 - [x] **M3 评分书评**：1-5 星一人一票（增量聚合 + 每日对账自愈）、书级评论区（最热/最新、软删除、越权拦截）、楼中楼两层、点赞幂等
-- [x] **M4 搜索**：ES 索引 + 别名 + IK、Outbox 增量同步（投递确认 / 手动 ack / 死信）、手写 DSL 查询（高亮 / 筛选 / 五种排序）、搜索建议、每日全量重建（零停机切别名）
+- [x] **M4 搜索**：ES 索引 + 别名 + IK、Outbox 增量同步（投递确认 / 手动 ack / 死信）、手写 DSL 查询（高亮 / 筛选 / 五种排序）、搜索建议、每日全量重建（零停机切别名、写入失败不切换）
 - [ ] M5 榜单
 - [ ] M6 社区
 - [ ] M7 工程收尾（压测 / CI / 架构图）

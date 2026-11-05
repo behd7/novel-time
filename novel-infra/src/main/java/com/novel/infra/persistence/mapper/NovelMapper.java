@@ -57,13 +57,19 @@ public interface NovelMapper extends BaseMapper<NovelEntity> {
             """)
     int addRating(@Param("id") long id, @Param("sumDelta") long sumDelta, @Param("countDelta") int countDelta);
 
-    /** 对账任务用：明细重算出来的值直接覆盖。 */
+    /**
+     * 对账任务用：明细重算出来的值直接覆盖。
+     *
+     * <p>版本号同样要 +1：对账修正也是一次内容变更，覆盖之后要发事件告诉搜索索引，
+     * 而索引端是"版本更大才生效"——版本不变会被当成重复消息直接丢掉。
+     */
     @Update("""
             UPDATE novel
                SET rating_sum = #{sum},
                    rating_count = #{count},
                    avg_rating = CASE WHEN #{count} = 0 THEN 0
-                                     ELSE ROUND(#{sum} / #{count}, 2) END
+                                     ELSE ROUND(#{sum} / #{count}, 2) END,
+                   version    = version + 1
              WHERE id = #{id}
             """)
     int setRatingStats(@Param("id") long id, @Param("sum") long sum, @Param("count") int count);

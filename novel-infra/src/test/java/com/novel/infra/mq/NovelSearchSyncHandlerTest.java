@@ -61,7 +61,7 @@ class NovelSearchSyncHandlerTest {
     private NovelSearchSyncHandler handler;
 
     private final Novel novel = new Novel(NOVEL_ID, "青云志", "佚名", null, 1L, 0, "简介",
-            900, 5, 10L, LocalDateTime.now(), 0, BigDecimal.ZERO, 0L, 0, 0,
+            900, 5, 10L, LocalDateTime.now(), 0L, 0, BigDecimal.ZERO, 0L, 0, 0,
             BigDecimal.ZERO, VERSION, LocalDateTime.now());
 
     private final NovelDoc doc = new NovelDoc(NOVEL_ID, "青云志", "佚名", null, 1L, "玄幻",

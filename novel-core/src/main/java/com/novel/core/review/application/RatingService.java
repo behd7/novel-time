@@ -111,13 +111,30 @@ public class RatingService {
                 .orElseThrow(() -> new BizException(ResultCode.NOVEL_NOT_FOUND));
     }
 
-    /** 供对账任务复用：把明细重算结果覆盖回 novel。 */
+    /**
+     * 供对账任务复用：把明细重算结果覆盖回 novel。
+     *
+     * <p>只有"重算值和库里的不一致"时才写库并发事件。对账跑在每天 03:30，索引重建跑在 02:00，
+     * 如果这里不补一刀，对账修正过的平均分要等到下一次有人评分、或者次日重建才进索引——
+     * 而这正是"搜索页 4.5 分、详情页 4.2 分"的来源。
+     *
+     * <p>比较的是总分和人数，不是平均分：四舍五入后的平均分可能"两个人都改了一分、均值不变"，
+     * 拿它判变化会漏掉真实的修正。
+     */
     @Transactional
     public void recalculate(long novelId) {
         RatingRepository.Aggregate aggregate = ratingRepository.aggregate(novelId);
+        Novel current = novelRepository.findById(novelId).orElse(null);
+        if (current == null) {
+            // 书已经被物理删掉了，聚合值没有归宿
+            return;
+        }
+        if (current.ratingSum() == aggregate.sum() && current.ratingCount() == aggregate.count()) {
+            // 绝大多数书每天都走到这里：明细和聚合一致，什么都不用做，也就不会产生任何消息
+            return;
+        }
         novelRepository.setRatingStats(novelId, aggregate.sum(), aggregate.count());
-        // 这里刻意不发事件：对账是每天凌晨对所有书跑一遍的批量动作，
-        // 逐本发消息只会让投递队列在重建前后各多一轮无用功，重建本身已经覆盖了它。
+        notifyChanged(novelId);
     }
 
     /**

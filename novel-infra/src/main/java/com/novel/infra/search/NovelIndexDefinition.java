@@ -1,5 +1,6 @@
 package com.novel.infra.search;
 
+import co.elastic.clients.elasticsearch._types.mapping.DynamicMapping;
 import co.elastic.clients.elasticsearch.indices.CreateIndexRequest;
 import com.novel.core.search.SearchTime;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +50,10 @@ public class NovelIndexDefinition {
                 // 单节点开发环境：1 分片 0 副本。副本数写 1 会让集群一直处于 yellow
                 .settings(s -> s.numberOfShards("1").numberOfReplicas("0"))
                 .mappings(m -> m
+                        // strict：文档里出现未声明的字段直接写失败，而不是让 ES 猜一个类型建上去。
+                        // 猜出来的类型一旦占了位（比如把 "1" 猜成 text），想改只能重建索引。
+                        // 代价是给 NovelDoc 加字段时忘了同步映射，写入会报错并进死信——这是故意的。
+                        .dynamic(DynamicMapping.Strict)
                         .properties(F_NOVEL_ID, p -> p.long_(l -> l))
                         .properties(F_TITLE, p -> p.text(t -> t.analyzer(analyzer).searchAnalyzer(searchAnalyzer)))
                         .properties(F_TITLE_SUGGEST, p -> p.completion(c -> c
