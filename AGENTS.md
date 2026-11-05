@@ -382,7 +382,7 @@ Client
 
 **对象存储**（`StorageConfig` → `S3StorageAdapter`）：AWS SDK 走 S3 协议，`pathStyleAccessEnabled(true)`（MinIO 必需），`S3Client` 与 `S3Presigner` 的 endpoint/region/凭证必须完全一致。`StorageBootstrap`（`@Order(100)` 的 `ApplicationRunner`）启动时幂等建 bucket 并设公共读策略，失败只打 warn 不影响启动。
 
-**MySQL / Flyway**：迁移脚本在 `novel-api/src/main/resources/db/migration`，`V1__init_schema.sql` + `V2__seed_categories.sql` + `V3__add_novel_version.sql`，共 21 张业务表 + `flyway_schema_history`。MyBatis-Plus 拦截器顺序固定为 **分页 → 乐观锁 → 防全表攻击**，分页 `maxLimit=50`。
+**MySQL / Flyway**：迁移脚本在 `novel-api/src/main/resources/db/migration`，`V1__init_schema.sql` + `V2__seed_categories.sql` + `V3__add_novel_version.sql` + `V4__backfill_novel_review_count.sql`，共 21 张业务表 + `flyway_schema_history`。MyBatis-Plus 拦截器顺序固定为 **分页 → 乐观锁 → 防全表攻击**，分页 `maxLimit=50`。
 
 **ES**（`SearchProperties` → `EsNovelSearchAdapter`）：
 
@@ -421,6 +421,10 @@ Client
 > `user_stat` 的三个计数（`bookshelf_count` / `review_count` / `like_received`）**当前由业务代码同步维护**
 > —— 书架增删、书评增删、点赞增减各自加减一次，不依赖 MQ。将来接 `q.novel.stat.agg` 改成事件驱动时，
 > 必须把这几处直接写库的调用一并去掉，否则会双写。
+>
+> `novel` 上的 `favorite_count` / `review_count` 同理：前者随书架增删、后者随书评增删同步维护。
+> 这两列是榜单的算分输入（总榜的原始行为量 = 阅读×1 + 收藏×3 + 书评×2），
+> 少维护一个，总榜就会和日/周/月榜用两套刻度——`review_count` 曾经就是这样漏了整整四个里程碑。
 
 ### 2.8 响应与错误码契约
 
@@ -483,7 +487,7 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active
 java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=rank
 
 # 测试
-mvn test                                  # 171 个用例，含 Testcontainers（需 Docker）
+mvn test                                  # 174 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
 mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
 mvn test -Dtest=AuthFlowIntegrationTest   # 认证链路端到端

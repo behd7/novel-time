@@ -60,6 +60,15 @@ public interface NovelRepository {
     void addFavoriteCount(long novelId, int delta);
 
     /**
+     * 书评数随发/删调整。
+     *
+     * <p>总榜按 {@code review_count} 算书评权重。这一列如果没人维护，日/周/月榜会因为
+     * 实时层记了"书评 ×2"而把书评算进去，总榜却永远是 0——两张榜用两套刻度，
+     * 而这恰恰是 {@code RankProperties} 注释里声称要避免的事。
+     */
+    void addReviewCount(long novelId, int delta);
+
+    /**
      * 原子地调整评分聚合值。
      *
      * @param sumDelta   总分增量（改分时是"新分 - 旧分"，可能是负数）

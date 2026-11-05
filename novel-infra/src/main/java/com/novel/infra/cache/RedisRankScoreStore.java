@@ -83,8 +83,15 @@ public class RedisRankScoreStore implements RankScoreStore {
         this.clock = clock;
     }
 
+    /**
+     * 桶的键。
+     *
+     * <p>必须带周期名：{@code daily:20261105} 和 {@code monthly:202611} 的桶名不会撞，
+     * 但 {@code weekly:2026W45} 与 {@code daily:20261105} 摆在一起时，没有周期段就看不出谁是谁；
+     * 更重要的是运维照着文档 {@code rank:novel:daily:*} 去扫，不该扫不到。
+     */
     static String zsetKey(RankPeriod period, LocalDate day) {
-        return "rank:novel:" + period.bucket(day);
+        return "rank:novel:" + period.name().toLowerCase(Locale.ROOT) + ":" + period.bucket(day);
     }
 
     private static String seenKey(LocalDate day) {

@@ -41,6 +41,12 @@ public interface NovelMapper extends BaseMapper<NovelEntity> {
     int addFavoriteCount(@Param("id") long id, @Param("delta") int delta);
 
     /**
+     * 书评数增减。与收藏数同一套兜底：{@code GREATEST(..., 0)} 防止异常路径把计数减成负数。
+     */
+    @Update("UPDATE novel SET review_count = GREATEST(review_count + #{delta}, 0) WHERE id = #{id}")
+    int addReviewCount(@Param("id") long id, @Param("delta") int delta);
+
+    /**
      * 评分聚合的增量维护。
      *
      * <p>写法有个 MySQL 特有的坑：{@code UPDATE} 的多个赋值是**从左到右依次生效**的，

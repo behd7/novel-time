@@ -94,6 +94,9 @@ public class ReviewService {
         long reviewId = reviewRepository.create(new Review(null, novelId, userId, text, score,
                 0, 0, LocalDateTime.now()));
         userRepository.addReviewCount(userId, 1);
+        // 书级计数与用户级计数是两份：novel.review_count 是总榜算书评权重的输入，
+        // 不维护的话日/周/月榜算了书评、总榜却是 0，两张榜直接用两套刻度
+        novelRepository.addReviewCount(novelId, 1);
         rankScoreStore.recordAction(novelId, RankAction.REVIEW, 1);
         log.info("新增书评 reviewId={} novelId={} userId={}", reviewId, novelId, userId);
 
@@ -109,6 +112,7 @@ public class ReviewService {
         }
         reviewRepository.softDelete(reviewId);
         userRepository.addReviewCount(userId, -1);
+        novelRepository.addReviewCount(review.novelId(), -1);
         rankScoreStore.recordAction(review.novelId(), RankAction.REVIEW, -1);
         log.info("删除书评 reviewId={} userId={}", reviewId, userId);
     }

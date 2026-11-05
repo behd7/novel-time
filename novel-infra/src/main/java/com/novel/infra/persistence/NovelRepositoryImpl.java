@@ -152,6 +152,11 @@ public class NovelRepositoryImpl implements NovelRepository {
     }
 
     @Override
+    public void addReviewCount(long novelId, int delta) {
+        novelMapper.addReviewCount(novelId, delta);
+    }
+
+    @Override
     public void addRating(long novelId, long sumDelta, int countDelta) {
         if (sumDelta == 0 && countDelta == 0) {
             return;

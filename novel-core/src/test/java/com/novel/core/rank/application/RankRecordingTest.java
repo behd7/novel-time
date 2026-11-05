@@ -127,6 +127,34 @@ class RankRecordingTest {
         verify(scoreStore).recordAction(1L, RankAction.REVIEW, -1);
     }
 
+    @Test
+    @DisplayName("发书评同步维护 novel.review_count：总榜靠这一列算书评权重")
+    void reviewCreate_updatesNovelReviewCount() {
+        ReviewRepository reviews = mock(ReviewRepository.class);
+        RatingService rating = mock(RatingService.class);
+        when(novelRepository.findById(1L)).thenReturn(Optional.of(novel(1)));
+        when(reviews.create(any())).thenReturn(7L);
+        when(reviews.findById(7L)).thenReturn(Optional.of(
+                new Review(7L, 1L, 9L, "好", 5, 0, 0, LocalDateTime.of(2026, 11, 5, 10, 0))));
+
+        service(reviews, rating).create(1L, 9L, "好", 5);
+
+        verify(novelRepository).addReviewCount(1L, 1);
+    }
+
+    @Test
+    @DisplayName("删书评把 novel.review_count 扣回去")
+    void reviewDelete_decrementsNovelReviewCount() {
+        ReviewRepository reviews = mock(ReviewRepository.class);
+        RatingService rating = mock(RatingService.class);
+        when(reviews.findById(7L)).thenReturn(Optional.of(
+                new Review(7L, 1L, 9L, "好", null, 2, 0, LocalDateTime.of(2026, 11, 5, 10, 0))));
+
+        service(reviews, rating).delete(7L, 9L);
+
+        verify(novelRepository).addReviewCount(1L, -1);
+    }
+
     private ReviewService service(ReviewRepository reviews, RatingService rating) {
         return new ReviewService(reviews, novelRepository, userRepository,
                 mock(LikeRepository.class), rating, scoreStore);

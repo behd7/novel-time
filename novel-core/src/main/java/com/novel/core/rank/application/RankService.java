@@ -51,11 +51,14 @@ public class RankService {
             rankCache.put(period, rankDate, items);
         }
 
-        int from = (query.getPage() - 1) * query.getSize();
-        if (from >= items.size()) {
+        // 用 long 算偏移：page 直接来自查询参数，Integer.MAX_VALUE 时 int 乘法会溢出成负数，
+        // 从而绕过下面的越界判断，最后在 subList 里抛成 500
+        long offset = (long) (query.getPage() - 1) * query.getSize();
+        if (offset >= items.size()) {
             // 越界页也要带真实总数，否则前端会把"翻过头了"当成"榜单空了"
             return PageResult.of(List.of(), items.size(), query.getPage(), query.getSize());
         }
+        int from = (int) offset;
         int to = Math.min(from + query.getSize(), items.size());
         return PageResult.of(List.copyOf(items.subList(from, to)),
                 items.size(), query.getPage(), query.getSize());

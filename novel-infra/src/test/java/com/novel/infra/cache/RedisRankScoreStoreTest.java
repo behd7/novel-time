@@ -150,6 +150,19 @@ class RedisRankScoreStoreTest {
     }
 
     @Test
+    @DisplayName("ZSET 键名带周期段，与 AGENTS / README 里写的格式一致")
+    void zsetKey_includesPeriod() {
+        // 少了 period 这一段，日榜和月榜会撞进同一个键（202611 与 20261105 不同，
+        // 但 all 的桶名是 "all"，重命名后排查时会误以为键不存在）
+        assertThat(RedisRankScoreStore.zsetKey(RankPeriod.DAILY, TODAY))
+                .isEqualTo("rank:novel:daily:20261105");
+        assertThat(RedisRankScoreStore.zsetKey(RankPeriod.WEEKLY, TODAY))
+                .isEqualTo("rank:novel:weekly:2026W45");
+        assertThat(RedisRankScoreStore.zsetKey(RankPeriod.MONTHLY, TODAY))
+                .isEqualTo("rank:novel:monthly:202611");
+    }
+
+    @Test
     @DisplayName("缓存写入后能读回来，删除后读不到")
     void cache_roundTrip() {
         RedisRankCache cache = new RedisRankCache(redis, new ObjectMapper().findAndRegisterModules(),

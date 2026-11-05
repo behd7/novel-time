@@ -117,6 +117,20 @@ class RankServiceTest {
     }
 
     @Test
+    @DisplayName("超大页码不会让偏移溢出，越界仍然是空列表而不是 500")
+    void extremePage_returnsEmptyInsteadOfOverflow() {
+        snapshots.replace(RankPeriod.DAILY, TODAY, List.of(new RankEntry(1, 1, 5.0)));
+        givenNovels(novel(1, "甲"));
+
+        // (Integer.MAX_VALUE - 1) * 50 在 int 下溢出成负数，会绕过越界判断直达 subList
+        PageResult<RankItemView> page =
+                service.list(new RankQuery(RankPeriod.DAILY, Integer.MAX_VALUE, 50));
+
+        assertThat(page.getList()).isEmpty();
+        assertThat(page.getTotal()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("快照里的书已被删除时跳过该条，不让整个接口 500")
     void missingNovel_skipped() {
         snapshots.replace(RankPeriod.DAILY, TODAY,
