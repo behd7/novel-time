@@ -188,7 +188,7 @@
 
 ### 2.1 定位
 
-小说阅读 + 社区平台后端，**模块化单体（Modular Monolith）**：单进程部署，模块间靠 Maven 依赖方向与 ArchUnit 约束隔离，为将来拆分留口子。
+小说阅读 + 社区平台：**模块化单体（Modular Monolith）后端 + React 阅读前端**。后端单进程部署，模块间靠 Maven 依赖方向与 ArchUnit 约束隔离，为将来拆分留口子；前端在 `web/`，当前是 mock 数据的高保真原型。
 
 ### 2.2 技术栈
 
@@ -201,7 +201,8 @@
 | 搜索 | Elasticsearch 8.13 | IK 分词、BM25、高亮；**MySQL 才是真相源** |
 | 对象存储 | MinIO（S3 协议） | 封面/头像/导入原文件，预签名直传 |
 | 持久层 | MyBatis-Plus 3.5.7 + Flyway | SQL 可控，schema 版本化 |
-| 文档 / 监控 | SpringDoc OpenAPI 3 + Actuator/Micrometer | Swagger 即演示界面 |
+| 文档 / 监控 | SpringDoc OpenAPI 3 + Actuator/Micrometer | Swagger 即接口演示界面 |
+| 前端 | React 19 + TypeScript + Vite 8 + Tailwind 4 | `web/`，不引组件库；数据仍为 mock |
 
 ### 2.3 模块与依赖方向
 
@@ -210,8 +211,12 @@ novel/                      聚合 POM（pom.xml）
 ├── novel-common/           统一响应 Result<T>、错误码、分页、BizException   （最底层，不依赖任何业务模块）
 ├── novel-core/             领域模型 + 应用服务 + 端口接口（不引 web/mybatis/redis/es）
 ├── novel-infra/            MyBatis、Redis、MQ、ES、MinIO、健康探针的适配器
-└── novel-api/              Controller、全局异常、traceId、配置、启动类（装配根）
+├── novel-api/              Controller、全局异常、traceId、配置、启动类（装配根）
+└── web/                    React 前端（Vite + Tailwind；当前为 mock 数据原型）
 ```
+
+`web/` 不参与 Maven 构建与 ArchUnit 约束；它通过 HTTP 契约与后端耦合，接口类型手抄在
+`web/src/api/types.ts`，字段以 Java record 的 JSON 输出为准。
 
 依赖方向：`novel-api → novel-core ← novel-infra`，`novel-common` 被三者依赖。
 
@@ -495,6 +500,12 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active
 # 手动结算榜单（不起 Web；日/周/月/总四个周期各算一遍后退出）
 java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=rank
 
+# 前端（web/）
+cd web && pnpm install
+cd web && pnpm dev                        # http://127.0.0.1:5173，/api 代理到 8080
+cd web && pnpm typecheck && pnpm build
+cd web && pnpm smoke                      # Playwright 冒烟，需另一个终端跑着 dev
+
 # 测试
 mvn test                                  # 187 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
@@ -527,7 +538,18 @@ mvn test -Dtest=RankFlowIntegrationTest    # 行为→结算→读榜端到端
 - [x] **M4 搜索**：ES 索引 + 别名 + IK、Outbox 增量同步（投递确认 / 手动 ack / 死信）、手写 DSL 查询（高亮 / 筛选 / 五种排序）、搜索建议、每日全量重建（零停机切别名、写入失败不切换）
 - [x] **M5 榜单**：日/周/月/总四榜（ISO 周对齐）、Redis ZSET 实时层 + 按用户/IP 按天去重、10 分钟结算快照（整份替换）、读缓存、`hot_score` 回写（不进索引，等每日重建）
 - [x] **M6 社区**：帖子（结构化引用小说卡片 + 占位符回显）、最新/最热列表、帖子点赞、两层评论与评论点赞、作者软删除、发帖/评论/点赞计数同步维护
+- [x] **F1 前端原型**：设计文档 + 9 个页面 + 程序化封面 + 15 条 Playwright 断言（数据仍为 mock）
 - [ ] M7 工程收尾（压测 / CI / 架构图）
+
+### 2.12 前端（web/，原型阶段）
+
+技术栈见 2.2；目录与运行方式见 `web/README.md`，设计决策见 `docs/03-前端设计.md`。
+
+- **状态**：9 个页面已实现，数据全部来自 `web/src/mocks`，**尚未调用后端接口**；演示账号是前端模拟登录，与 JWT 无关。
+- **样式**：Tailwind 4 的 `@theme` 是唯一 token 源；封面无素材时按「书名 + 作者」确定性生成，有 `coverKey` 时用 MinIO 真图。
+- **接口类型**：手抄在 `web/src/api/types.ts`，字段以 Java record 的 JSON 输出为准；改 View 时同步改这里。
+- **联调**：Vite 把 `/api` 代理到 `127.0.0.1:8080`，后端不需要 CORS；生产由 Nginx 同域转发。
+- **验证**：`pnpm typecheck`、`pnpm build`、`pnpm smoke`（15 条断言，需 dev 在跑）。
 
 ---
 
@@ -544,3 +566,7 @@ mvn test -Dtest=RankFlowIntegrationTest    # 行为→结算→读榜端到端
 9. **新增功能先写测试再写实现**：每个红绿循环的红灯必须是"测试跑起来并失败"（先建空壳让编译通过），
    不能是编译不过；每完成一个模块只跑该模块的相关测试，全量 `mvn test` 留到功能收尾。
 10. **索引只当副本**：任何"读自己刚写的数据"都走 MySQL；ES 挂了搜索返回 `10601`，其余接口不受影响。
+11. **前端颜色与字体只从 token 取**：`web/src/styles/index.css` 的 `@theme` 是唯一来源，页面里不写死十六进制。
+12. **高亮 HTML 只保留 `<em>`**：引擎返回的片段在插入页面前剥掉其余标签与属性；用户输入永远不能当 HTML 渲染。
+13. **详情接口有副作用**：`GET /novels/{id}` 每次调用都会让阅读数 +1，前端禁止 hover 预取、
+    `refetchOnWindowFocus` 与无意义的重复请求。

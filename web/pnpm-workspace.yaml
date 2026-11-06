@@ -1,0 +1,8 @@
+# 本机 pnpm 的供应链策略要求依赖发布满一定天数才允许安装。
+# 下面几项是本次显式选定的版本（lockfile 里已锁定），加入排除列表才能通过 pnpm 的策略校验。
+# 如果你的 pnpm 没有开启该策略，可以直接删掉这个文件；删除后请先 pnpm clean --lockfile 再 install。
+minimumReleaseAgeExclude:
+  - lucide-react@1.69.0
+  - vite@8.3.6
+  - playwright-core@1.65.0
+  - playwright@1.65.0

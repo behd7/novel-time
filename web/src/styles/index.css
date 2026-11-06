@@ -1,0 +1,193 @@
+@import '@fontsource-variable/inter/index.css';
+@import '@fontsource-variable/noto-sans-sc/index.css';
+@import '@fontsource-variable/noto-serif-sc/index.css';
+@import 'tailwindcss';
+
+/*
+ * 设计 token
+ * ---------------------------------------------------------------
+ * 只允许从这里取颜色与字体。页面里出现 #xxxxxx 就说明 token 漏了一个。
+ * 纸白 + 墨黑 + 松绿：小说站不需要第二个强调色，金色只留给评分。
+ */
+@theme {
+  --font-sans:
+    'Inter Variable', 'Noto Sans SC Variable', ui-sans-serif, system-ui, -apple-system,
+    'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-serif: 'Noto Serif SC Variable', 'Source Han Serif SC', 'Songti SC', 'SimSun', serif;
+
+  --color-paper: #f6f4ef;
+  --color-paper-deep: #efebe2;
+  --color-surface: #fffefb;
+  --color-ink: #1a1815;
+  --color-ink-soft: #403b34;
+  --color-muted: #7b756b;
+  --color-faint: #a39c90;
+  --color-line: #e4dfd4;
+  --color-line-strong: #d1c9ba;
+  --color-accent: #2e594e;
+  --color-accent-deep: #21433a;
+  --color-accent-soft: #e6eeea;
+  --color-gold: #b0873f;
+  --color-gold-soft: #f3ead8;
+  --color-danger: #a8483d;
+  --color-danger-soft: #f7e8e5;
+
+  --radius-xs: 3px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --shadow-card: 0 1px 2px rgb(26 24 21 / 0.04), 0 14px 36px -18px rgb(26 24 21 / 0.22);
+  --shadow-cover: 0 2px 4px rgb(26 24 21 / 0.08), 0 24px 48px -20px rgb(26 24 21 / 0.42);
+  --shadow-pop: 0 10px 40px -12px rgb(26 24 21 / 0.24);
+
+  --ease-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background-color: var(--color-accent);
+    color: var(--color-paper);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  input,
+  textarea {
+    font-family: inherit;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* 纸张颗粒：只在封面、深色区块上叠一层，页面底色保持干净 */
+@utility grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.16'/%3E%3C/svg%3E");
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* 正文首段不缩进，其余段落缩进两字：中文排版里第一段顶格更透气 */
+@utility prose-cn {
+  font-family: var(--font-serif);
+  p + p {
+    text-indent: 2em;
+  }
+}
+
+/* 阅读器主题变量 */
+.reader-shell {
+  --reader-bg: #f5f1e8;
+  --reader-fg: #2a251d;
+  --reader-muted: #8a8072;
+  --reader-line: #ded5c4;
+  --reader-accent: #2e594e;
+  background-color: var(--reader-bg);
+  color: var(--reader-fg);
+}
+
+.reader-shell[data-theme='sepia'] {
+  --reader-bg: #f0e3c8;
+  --reader-fg: #3a2d1d;
+  --reader-muted: #8b7a5f;
+  --reader-line: #decfae;
+  --reader-accent: #7a5b2e;
+}
+
+.reader-shell[data-theme='night'] {
+  --reader-bg: #14151a;
+  --reader-fg: #c6c2ba;
+  --reader-muted: #7e7b75;
+  --reader-line: #292a30;
+  --reader-accent: #8fae9f;
+}
+
+.reader-body {
+  font-size: var(--reader-size, 19px);
+  line-height: var(--reader-leading, 1.95);
+}
+
+.reader-body p {
+  text-indent: 2em;
+  margin: 0;
+}
+
+.reader-body p + p {
+  margin-top: 0.85em;
+}
+
+/* 搜索高亮：ES 返回的是 <em> 包好的片段 */
+.highlight em {
+  font-style: normal;
+  color: var(--color-accent);
+  background: linear-gradient(transparent 62%, var(--color-accent-soft) 62%);
+  padding: 0 0.05em;
+}
+
+/* 细滚动条，长目录里不难看 */
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+/* 小尺寸封面（榜单、书架行）里，放大的书名字会糊成一团墨，直接隐藏 */
+@container (max-width: 72px) {
+  .cover-mark {
+    display: none;
+  }
+}
