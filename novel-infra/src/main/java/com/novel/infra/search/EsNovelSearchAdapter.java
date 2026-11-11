@@ -23,6 +23,7 @@ import com.novel.core.search.port.NovelSearchPort;
 import com.novel.core.search.port.SearchUnavailableException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.elasticsearch.client.ResponseException;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -135,13 +136,19 @@ public class EsNovelSearchAdapter implements NovelSearchPort {
         try {
             client.index(request);
         } catch (ElasticsearchException e) {
-            if (e.status() == 409) {
+            if (hasStatus(e, 409)) {
                 // 版本比集群里的旧，说明这条消息迟到了。丢弃才是正确行为，不是错误。
                 log.debug("丢弃过期索引写入 index={} novelId={} version={}", index, doc.novelId(), version);
                 return;
             }
             throw new SearchUnavailableException("索引写入失败：" + e.getMessage(), e);
         } catch (IOException e) {
+            // 底层 REST 客户端把 409 包成 ResponseException（IOException 子类），
+            // 不会走上面的 ElasticsearchException 分支，所以这里必须再判一次。
+            if (hasStatus(e, 409)) {
+                log.debug("丢弃过期索引写入 index={} novelId={} version={}", index, doc.novelId(), version);
+                return;
+            }
             throw new SearchUnavailableException("索引写入失败", e);
         }
     }
@@ -155,13 +162,50 @@ public class EsNovelSearchAdapter implements NovelSearchPort {
                     .versionType(VersionType.External));
         } catch (ElasticsearchException e) {
             // 404 = 本来就没有；409 = 迟到消息。两者都不该让消费失败重试
-            if (e.status() == 404 || e.status() == 409) {
+            if (hasStatus(e, 404, 409)) {
                 return;
             }
             throw new SearchUnavailableException("索引删除失败：" + e.getMessage(), e);
         } catch (IOException e) {
+            if (hasStatus(e, 404, 409)) {
+                return;
+            }
             throw new SearchUnavailableException("索引删除失败", e);
         }
+    }
+
+    /**
+     * 沿异常因果链找 HTTP 状态码。
+     *
+     * <p>高阶客户端的 {@link ElasticsearchException} 带 {@code status()}；
+     * 但有些路径（尤其是底层 REST 客户端直接抛的）是
+     * {@link ResponseException}，它是 {@link IOException} 的子类，状态码挂在响应上。
+     * 只判前者会让 409 落进 IOException 分支，重试三次后误进死信。
+     */
+    private static boolean hasStatus(Throwable error, int... expected) {
+        for (Throwable current = error; current != null; current = current.getCause()) {
+            if (current instanceof ElasticsearchException elasticsearch
+                    && contains(expected, elasticsearch.status())) {
+                return true;
+            }
+            if (current instanceof ResponseException responseException
+                    && responseException.getResponse() != null
+                    && responseException.getResponse().getStatusLine() != null
+                    && contains(expected,
+                            responseException.getResponse().getStatusLine().getStatusCode())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean contains(int[] values, int target) {
+        for (int value : values) {
+            if (value == target) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private SearchRequest buildSearchRequest(SearchQuery query) {
