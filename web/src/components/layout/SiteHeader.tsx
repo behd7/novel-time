@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn';
 const NAV = [
   { to: '/browse', label: '书库' },
   { to: '/rank', label: '榜单' },
+  { to: '/community', label: '社区' },
   { to: '/bookshelf', label: '书架' },
 ];
 

@@ -8,9 +8,14 @@ import type {
   NovelDetail,
   NovelSummary,
   PageResult,
+  PostComment,
+  PostDetail,
+  PostView,
+  PresignedUpload,
   RankItem,
   RatingSummary,
   Review,
+  ReviewReply,
   SearchHit,
   SuggestItem,
   User,
@@ -97,4 +102,35 @@ export const api = {
       { auth: false, retryOnUnauthorized: false },
     ),
   logout: (refreshToken: string) => post<void>('/auth/logout', { refreshToken }),
+
+  posts: (params: { sort?: 'hot' | 'latest'; novelId?: number; page?: number; size?: number } = {}) =>
+    get<PageResult<PostView>>(`/posts${query({ ...params })}`),
+  post: (id: number) => get<PostDetail>(`/posts/${id}`),
+  createPost: (body: { title: string; content: string; coverKey?: string; refNovelIds: number[] }) =>
+    post<PostDetail>('/posts', body),
+  deletePost: (id: number) => del<void>(`/posts/${id}`),
+  likePost: (id: number) => post<void>(`/posts/${id}/like`),
+  unlikePost: (id: number) => del<void>(`/posts/${id}/like`),
+
+  postComments: (postId: number, params: PageParams = {}) =>
+    get<PageResult<PostComment>>(`/posts/${postId}/comments${query({ ...params })}`),
+  createPostComment: (postId: number, content: string, parentCommentId?: number) =>
+    post<PostComment>(`/posts/${postId}/comments`, { content, parentCommentId }),
+  deletePostComment: (commentId: number) => del<void>(`/comments/${commentId}`),
+  likePostComment: (commentId: number) => post<void>(`/comments/${commentId}/like`),
+  unlikePostComment: (commentId: number) => del<void>(`/comments/${commentId}/like`),
+
+  createReview: (novelId: number, content: string, score?: number) =>
+    post<Review>(`/novels/${novelId}/reviews`, { content, score }),
+  deleteReview: (reviewId: number) => del<void>(`/reviews/${reviewId}`),
+  reviewReplies: (reviewId: number, params: PageParams = {}) =>
+    get<PageResult<ReviewReply>>(`/reviews/${reviewId}/replies${query({ ...params })}`),
+  createReply: (reviewId: number, content: string, parentReplyId?: number) =>
+    post<ReviewReply>(`/reviews/${reviewId}/replies`, { content, parentReplyId }),
+  deleteReply: (replyId: number) => del<void>(`/replies/${replyId}`),
+  likeReply: (replyId: number) => post<void>(`/replies/${replyId}/like`),
+  unlikeReply: (replyId: number) => del<void>(`/replies/${replyId}/like`),
+
+  presign: (body: { bizType: 'COVER' | 'AVATAR' | 'POST' | 'IMPORT'; fileName: string; contentType: string }) =>
+    post<PresignedUpload>('/files/presign', body),
 };

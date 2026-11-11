@@ -141,6 +141,8 @@ export interface ReviewReply {
   nickname: string;
   avatarKey?: string | null;
   content: string;
+  parentReplyId?: number | null;
+  parentNickname?: string | null;
   likeCount: number;
   liked: boolean;
   createdAt: string;
@@ -176,6 +178,68 @@ export interface AuthResult {
   /** access 令牌剩余有效秒数 */
   expiresIn: number;
   user: User;
+}
+
+export interface PostView {
+  id: number;
+  userId: number;
+  nickname: string;
+  avatarKey?: string | null;
+  title: string;
+  summary: string;
+  coverKey?: string | null;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  liked: boolean;
+  createdAt: string;
+}
+
+export interface PostRef {
+  refText: string;
+  novelId: number;
+  title: string;
+  authorName: string;
+  coverKey?: string | null;
+  avgRating: number;
+}
+
+export interface PostDetail {
+  id: number;
+  userId: number;
+  nickname: string;
+  avatarKey?: string | null;
+  title: string;
+  content: string;
+  coverKey?: string | null;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  liked: boolean;
+  refs: PostRef[];
+  createdAt: string;
+}
+
+export interface PostComment {
+  id: number;
+  userId: number;
+  nickname: string;
+  avatarKey?: string | null;
+  content: string;
+  rootId: number;
+  parentCommentId?: number | null;
+  parentNickname?: string | null;
+  parentDeleted: boolean;
+  likeCount: number;
+  liked: boolean;
+  createdAt: string;
+}
+
+export interface PresignedUpload {
+  objectKey: string;
+  uploadUrl: string;
+  publicUrl: string;
+  expiresIn: number;
 }
 
 export interface BookshelfItem extends BookCoverInfo {

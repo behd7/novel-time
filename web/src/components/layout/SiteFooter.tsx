@@ -36,6 +36,11 @@ export function SiteFooter() {
                 </Link>
               </li>
               <li>
+                <Link className="transition-colors hover:text-ink" to="/community">
+                  社区
+                </Link>
+              </li>
+              <li>
                 <Link className="transition-colors hover:text-ink" to="/bookshelf">
                   我的书架
                 </Link>

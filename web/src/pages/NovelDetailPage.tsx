@@ -5,10 +5,8 @@ import {
   ArrowRight,
   Check,
   ChevronDown,
-  MessageCircle,
   Plus,
   Star,
-  ThumbsUp,
 } from 'lucide-react';
 import { formatCount, formatRating, formatRelativeTime, formatWordCount } from '@/lib/format';
 import { designCover } from '@/lib/cover';
@@ -25,7 +23,6 @@ import {
   useNovel,
   useNovels,
   useRating,
-  useReviews,
 } from '@/api/queries';
 import { useToast } from '@/components/ui/Toast';
 import { NovelCover } from '@/components/book/NovelCover';
@@ -34,8 +31,8 @@ import { Button, ButtonLink } from '@/components/ui/Button';
 import { Stars, StarPicker } from '@/components/ui/Stars';
 import { Tag, StatusDot } from '@/components/ui/Tag';
 import { UnderlineTabs } from '@/components/ui/Segmented';
-import { Avatar } from '@/components/ui/Avatar';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ReviewSection } from '@/features/reviews/ReviewSection';
 import { LoadError, errorMessage } from '@/components/ui/LoadError';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { NotFoundPage } from './NotFoundPage';
@@ -59,12 +56,6 @@ export function NovelDetailPage() {
   const [tab, setTab] = useState<Tab>('catalog');
   const [expanded, setExpanded] = useState(false);
   const [ratingOpen, setRatingOpen] = useState(false);
-  const [showAllReviews, setShowAllReviews] = useState(false);
-  const reviewsQuery = useReviews(novelId, {
-    sort: 'hot',
-    page: 1,
-    size: showAllReviews ? 20 : 3,
-  });
 
   const novel = novelQuery.data;
   const top = novel ? topOf(novel.categoryId) : undefined;
@@ -75,7 +66,6 @@ export function NovelDetailPage() {
 
   const [myRatingOverride, setMyRatingOverride] = useState<number | null | undefined>(undefined);
   const [shelfOverride, setShelfOverride] = useState<boolean | undefined>(undefined);
-  const [liked, setLiked] = useState<Record<number, boolean>>({});
   const [ratingSaving, setRatingSaving] = useState(false);
   const [shelfSaving, setShelfSaving] = useState(false);
 
@@ -130,8 +120,6 @@ export function NovelDetailPage() {
     myRatingOverride !== undefined ? myRatingOverride : (rating?.myScore ?? null);
 
   const chapters = chaptersQuery.data?.list ?? [];
-  const reviews = reviewsQuery.data?.list ?? [];
-  const reviewTotal = reviewsQuery.data?.total ?? 0;
   const similar = (similarQuery.data?.list ?? []).filter((item) => item.id !== novelId).slice(0, 4);
 
   const requireLogin = () => {
@@ -187,25 +175,6 @@ export function NovelDetailPage() {
       }
     } finally {
       setShelfSaving(false);
-    }
-  };
-
-  const toggleLike = async (reviewId: number, currentlyLiked: boolean) => {
-    if (!user) {
-      requireLogin();
-      return;
-    }
-    setLiked((current) => ({ ...current, [reviewId]: !currentlyLiked }));
-    try {
-      if (currentlyLiked) {
-        await api.unlikeReview(reviewId);
-      } else {
-        await api.likeReview(reviewId);
-      }
-      await queryClient.invalidateQueries({ queryKey: ['reviews', novelId] });
-    } catch (error) {
-      setLiked((current) => ({ ...current, [reviewId]: currentlyLiked }));
-      toast(errorMessage(error), 'error');
     }
   };
 
@@ -321,6 +290,14 @@ export function NovelDetailPage() {
                 <Stat label="章节" value={`${novel.chapterCount} 章`} />
                 <Stat label="字数" value={formatWordCount(novel.wordCount)} />
               </div>
+
+              <Link
+                to={`/community?novelId=${novel.id}`}
+                className="mt-4 inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-accent"
+              >
+                社区里的相关讨论
+                <ArrowRight size={12} />
+              </Link>
             </div>
           </div>
         </div>
@@ -434,85 +411,7 @@ export function NovelDetailPage() {
               )}
             </div>
           ) : (
-            <div className="py-6">
-              {reviewsQuery.isError ? (
-                <LoadError
-                  error={reviewsQuery.error}
-                  onRetry={() => void reviewsQuery.refetch()}
-                />
-              ) : reviewsQuery.isLoading ? (
-                <div className="space-y-5">
-                  {Array.from({ length: 3 }, (_, index) => (
-                    <div key={index} className="space-y-3 border-b border-line/60 py-5">
-                      <Skeleton className="h-8 w-40" />
-                      <Skeleton className="h-4 w-full" />
-                      <Skeleton className="h-4 w-2/3" />
-                    </div>
-                  ))}
-                </div>
-              ) : reviews.length === 0 ? (
-                <EmptyState
-                  icon={<MessageCircle size={24} strokeWidth={1.3} />}
-                  title="还没有人写书评"
-                  description="第一条书评往往决定了后来的人要不要翻开这本书。"
-                />
-              ) : (
-                <div>
-                  {reviews.map((review) => {
-                    const isLiked = liked[review.id] ?? review.liked;
-                    const likeDelta = isLiked === review.liked ? 0 : isLiked ? 1 : -1;
-                    return (
-                      <article key={review.id} className="border-b border-line/60 py-5 first:pt-1">
-                        <div className="flex items-center gap-3">
-                          <Avatar name={review.nickname} size={32} />
-                          <div>
-                            <p className="text-[13px] text-ink">{review.nickname}</p>
-                            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-faint">
-                              {review.score ? (
-                                <>
-                                  <Stars value={review.score} size={10} />
-                                  <span>{review.score} 星</span>
-                                </>
-                              ) : null}
-                              <span>{formatRelativeTime(review.createdAt)}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <p className="mt-3 text-[13.5px] leading-[1.95] text-ink-soft">
-                          {review.content}
-                        </p>
-                        <div className="mt-3 flex items-center gap-5 text-[11.5px] text-muted">
-                          <button
-                            type="button"
-                            onClick={() => void toggleLike(review.id, isLiked)}
-                            className={cn(
-                              'inline-flex items-center gap-1.5 transition-colors hover:text-accent',
-                              isLiked && 'text-accent',
-                            )}
-                          >
-                            <ThumbsUp size={12} />
-                            {review.likeCount + likeDelta}
-                          </button>
-                          <span className="inline-flex items-center gap-1.5">
-                            <MessageCircle size={12} />
-                            {review.replyCount}
-                          </span>
-                        </div>
-                      </article>
-                    );
-                  })}
-                  {reviewTotal > 3 && !showAllReviews ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowAllReviews(true)}
-                      className="mt-5 text-[12.5px] text-accent transition-colors hover:text-accent-deep"
-                    >
-                      查看全部 {reviewTotal} 条书评
-                    </button>
-                  ) : null}
-                </div>
-              )}
-            </div>
+            <ReviewSection novelId={novel.id} />
           )}
         </section>
 

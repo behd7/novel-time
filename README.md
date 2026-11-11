@@ -111,8 +111,9 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar
 
 ## 前端（web/）
 
-React 19 + TypeScript + Vite + Tailwind 4 + TanStack Query，覆盖「找书 → 读书 → 账号」主线：
-首页、书库、搜索、榜单、详情、目录、阅读器、登录/注册、书架、个人主页，外加一页设计系统。
+React 19 + TypeScript + Vite + Tailwind 4 + TanStack Query，覆盖「找书 → 读书 → 讨论 → 账号」主线：
+首页、书库、搜索、榜单、详情、目录、阅读器、登录/注册、书架、个人主页、社区、帖子、发帖、他人主页，
+外加一页设计系统。
 **已接入真实后端接口（P1）**，登录/评分/书架/阅读进度都落库，`web/src/mocks` 已删除。
 
 ![首页](docs/assets/frontend/home.jpg)
@@ -129,7 +130,7 @@ pnpm dev        # http://127.0.0.1:5173，/api 自动代理到 8080
 - 数据来自 MySQL / ES：先起后端并导入 `deploy/samples/demo`，前端才有书可看
 - 请求层：access 内存 + refresh 轮换 + 401 单飞刷新；详情接口有阅读数副作用，全站关闭窗口聚焦重取
 - 前后端同源部署，开发期走 Vite 代理，因此 **后端没有也不需要 CORS 配置**
-- 交互冒烟：`cd web && pnpm smoke`（需后端 + 演示数据 + 另一个终端跑 `pnpm dev`，共 26 条断言）
+- 交互冒烟：`cd web && pnpm smoke`（需后端 + 演示数据 + 另一个终端跑 `pnpm dev`，共 34 条断言）
 
 ## 认证
 
@@ -335,7 +336,7 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active
 - [x] **M6 社区**：帖子 + 结构化小说引用（卡片回显、按书反查）、最新/最热列表、帖子与评论点赞、两层评论、作者软删除、计数同步维护
 - [x] **F1 前端原型**：设计文档 + 9 个页面 + 程序化封面 + Playwright 冒烟
 - [x] **F2 演示数据**：28 本虚构书（8 类）确定性生成器 + 导入链路定向测试
-- [x] **F3 前后端联调**：11 个页面接真实 API、令牌轮换、单飞刷新、错误态/空态/骨架屏
+- [x] **F3 前后端联调**：9 个页面接真实 API、令牌轮换、单飞刷新、错误态/空态/骨架屏
 - [x] **F4 书架与个人主页**：书架筛选/移出/继续阅读、个人资料编辑、统计/正在读/书架预览，26 条真实后端冒烟
 - [ ] M7 工程收尾（压测 / CI / 架构图）
 

@@ -21,10 +21,47 @@ const DEMO = { username: 'bookworm', password: 'novel123456' };
 
 let passed = 0;
 
+const API = 'http://127.0.0.1:8080/api/v1';
+
 function assert(condition, message) {
   if (!condition) throw new Error(`断言失败：${message}`);
   passed += 1;
   console.log(`  ✓ ${message}`);
+}
+
+/**
+ * 清理冒烟产生的帖子与书评。
+ *
+ * UI 里删帖已经覆盖，但书评没有在 UI 里删；失败中断时也可能留下半成品。
+ * 直接登录 API 按前缀清掉，保证脚本可以反复跑。
+ */
+async function cleanup() {
+  const login = await fetch(`${API}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'bookworm', password: 'novel123456' }),
+  }).then((response) => response.json());
+  const token = login?.data?.accessToken;
+  if (!token) return;
+
+  const headers = { Authorization: `Bearer ${token}` };
+  const posts = await fetch(`${API}/posts?sort=latest&page=1&size=50`, { headers })
+    .then((response) => response.json())
+    .catch(() => null);
+  for (const post of posts?.data?.list ?? []) {
+    if (post.title.startsWith('冒烟帖子')) {
+      await fetch(`${API}/posts/${post.id}`, { method: 'DELETE', headers }).catch(() => {});
+    }
+  }
+
+  const reviews = await fetch(`${API}/novels/10/reviews?sort=latest&page=1&size=50`, { headers })
+    .then((response) => response.json())
+    .catch(() => null);
+  for (const review of reviews?.data?.list ?? []) {
+    if (review.content.includes('冒烟书评')) {
+      await fetch(`${API}/reviews/${review.id}`, { method: 'DELETE', headers }).catch(() => {});
+    }
+  }
 }
 
 async function main() {
@@ -213,16 +250,77 @@ async function main() {
     await page.getByText('读书，写字，偶尔走神。').waitFor({ timeout: 8_000 });
     assert(true, '个人资料可编辑并回显');
 
-    console.log('9. 退出登录');
+    console.log('9. 社区发帖、评论与回复');
+    await page.goto(`${BASE}/community`);
+    await page.getByRole('heading', { name: '社区' }).waitFor({ timeout: 10_000 });
+    assert(true, '社区页可打开');
+    await page.getByRole('link', { name: '写帖子', exact: true }).click();
+    await page.waitForURL(/\/posts\/new$/, { timeout: 8_000 });
+    await page.getByPlaceholder('一句话说清你想聊什么').fill('冒烟帖子：剑来风雪');
+    await page.getByPlaceholder(/写下你的阅读感受/).fill('这本书的风雪写得很好。');
+    await page.getByLabel('选择引用的小说').selectOption('10');
+    await page.waitForTimeout(200);
+    await page.getByRole('button', { name: '发布帖子' }).click();
+    await page.waitForURL(/\/posts\/\d+$/, { timeout: 10_000 });
+    await page.getByRole('heading', { name: '冒烟帖子：剑来风雪' }).waitFor({ timeout: 8_000 });
+    assert(
+      (await page.getByText('[[ref:0]]').count()) === 0,
+      '帖子引用占位符已替换成书卡',
+    );
+
+    await page.getByPlaceholder('写下你的想法…').fill('冒烟评论内容');
+    await page.getByRole('button', { name: '发表评论' }).click();
+    await page.getByText('冒烟评论内容').waitFor({ timeout: 8_000 });
+    assert(true, '帖子评论可发表');
+
+    await page.getByRole('button', { name: '回复' }).first().click();
+    const replyForm = page.locator('form').filter({ hasText: '回复 @书虫' }).first();
+    await replyForm.getByPlaceholder(/回复 @书虫/).fill('冒烟回复内容');
+    await replyForm.getByRole('button', { name: '回复' }).click();
+    await page.getByText('冒烟回复内容').waitFor({ timeout: 8_000 });
+    assert(true, '楼中楼回复可发表');
+
+    await page.getByRole('button', { name: '删除' }).first().click();
+    await page.getByRole('button', { name: '确认删除' }).first().click();
+    await page.waitForURL(/\/community$/, { timeout: 8_000 });
+    await page.waitForFunction(() => !document.body.innerText.includes('冒烟帖子：剑来风雪'), null, {
+      timeout: 8_000,
+    });
+    assert(true, '帖子可删除');
+
+    console.log('10. 写书评与回复');
+    await page.goto(`${BASE}/novel/10`);
+    await page.getByRole('tab', { name: /书评/ }).click();
+    await page.getByRole('button', { name: '写书评' }).click();
+    await page.getByPlaceholder(/说说这本书哪里好/).fill('冒烟书评：风雪与断剑。');
+    await page.getByRole('button', { name: '发布书评' }).click();
+    await page.getByText('冒烟书评：风雪与断剑。').waitFor({ timeout: 8_000 });
+    assert(true, '书评可发表');
+
+    await page.getByRole('button', { name: /条回复/ }).first().click();
+    await page.getByPlaceholder('写一条回复…').fill('冒烟回复书评');
+    const reviewReplyForm = page.locator('form').filter({ has: page.getByPlaceholder('写一条回复…') });
+    await reviewReplyForm.getByRole('button', { name: '回复' }).click();
+    await page.getByText('冒烟回复书评').waitFor({ timeout: 8_000 });
+    assert(true, '书评回复可发表');
+
+    console.log('11. 他人主页');
+    await page.goto(`${BASE}/users/18`);
+    await page.getByRole('heading', { name: '联调读者' }).waitFor({ timeout: 8_000 });
+    await page.getByText('公开范围').waitFor();
+    assert(true, '他人主页显示公开资料与统计');
+
+    console.log('12. 退出登录');
     await page.getByText('书虫').first().click();
     await page.getByRole('menuitem', { name: '退出登录' }).click();
     await page.locator('header').getByText('登录', { exact: true }).waitFor({ timeout: 8_000 });
     assert(true, '退出后页头恢复登录入口');
 
-    console.log('10. 控制台');
+    console.log('13. 控制台');
     if (errors.length) console.log(errors.slice(0, 8));
     assert(errors.length === 0, `无控制台错误（实际 ${errors.length} 条）`);
   } finally {
+    await cleanup().catch(() => {});
     await browser.close();
   }
 

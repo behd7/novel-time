@@ -1,7 +1,7 @@
 # 夜读 · Web
 
 React 19 + TypeScript + Vite + Tailwind CSS 4 的小说阅读前端。**已接入真实后端接口（P1）**：
-11 个页面读 MySQL / ES 里的数据，登录走真实 JWT，`web/src/mocks` 已删除。
+15 个页面读 MySQL / ES 里的数据，登录走真实 JWT，`web/src/mocks` 已删除。
 
 设计说明见 [docs/03-前端设计.md](../docs/03-前端设计.md)，后端接口见
 [docs/01-设计方案.md](../docs/01-设计方案.md)。
@@ -19,7 +19,7 @@ React 19 + TypeScript + Vite + Tailwind CSS 4 的小说阅读前端。**已接�
 | 服务端状态 | TanStack Query 5（缓存、去重、失效、骨架屏） |
 | 字体 | Noto Serif SC / Noto Sans SC / Inter（`@fontsource-variable` 自托管，unicode-range 切片） |
 | 图标 | lucide-react |
-| 冒烟测试 | Playwright（`scripts/smoke.mjs`，26 条断言） |
+| 冒烟测试 | Playwright（`scripts/smoke.mjs`，34 条断言） |
 
 ## 快速开始
 
@@ -77,6 +77,10 @@ bookworm / novel123456
 | `/login` | 登录/注册 | `POST /auth/login`、`POST /auth/register`、`POST /auth/refresh` |
 | `/bookshelf` | 我的书架 | `GET /bookshelf`、`DELETE /bookshelf/{id}` |
 | `/me` | 个人主页 | `GET /users/{id}`、`PUT /users/me`、`GET /bookshelf` |
+| `/community` | 社区 | `GET /posts`、帖子点赞；发帖入口 |
+| `/posts/new` | 写帖子 | `POST /posts`、`GET /novels` |
+| `/posts/:id` | 帖子详情 | `GET /posts/{id}`、评论/回复/点赞/删除 |
+| `/users/:id` | 他人主页 | `GET /users/{id}` |
 | `/styleguide` | 设计系统 | 静态样例（不调接口） |
 
 ## 数据流
@@ -110,7 +114,7 @@ src/
 ├── features/auth/      # 真实登录、刷新、登出
 ├── features/categories/# 分类字典与树（GET /categories）
 ├── lib/                # cn / format / cover / progress / useDebouncedValue
-├── pages/              # 11 个页面
+├── pages/              # 15 个页面
 └── styles/index.css    # @theme token、字体、阅读器主题、纸张颗粒
 ```
 
@@ -136,7 +140,8 @@ pnpm smoke
 
 `pnpm smoke` 覆盖：未登录书架提示、真实登录、刷新后恢复会话、首页/书库真实数据、搜索建议与结果数、
 搜索空态、详情目录、评分落库、加入书架、阅读器字号持久化、键盘翻章、本地进度、服务端书架进度、
-书架筛选与移出、个人主页统计/正在读/资料编辑、退出登录、控制台零错误，共 **26 条断言**。
+书架筛选与移出、个人主页统计/正在读/资料编辑、社区发帖/评论/楼中楼回复/删帖、书评写入与回复、
+他人主页、退出登录、控制台零错误，共 **34 条断言**。脚本结束时通过 API 清理冒烟帖子与书评，可反复跑。
 
 Playwright 版本与已装浏览器不一致时，用 `CHROME_PATH` 指定本机 Chromium：
 
@@ -146,10 +151,11 @@ CHROME_PATH=/path/to/chrome pnpm smoke
 
 ## 现状与下一步
 
-- **现在（P1 完成）**：11 个页面全部接真实接口；请求层、令牌轮换、分页、筛选、错误态、骨架屏均已接入。
+- **现在（P1 完成）**：15 个页面全部接真实接口；请求层、令牌轮换、分页、筛选、错误态、骨架屏均已接入。
 - **书架/个人主页（已完成）**：书架可筛选、继续阅读、两段式移出；个人主页显示统计/正在读/书架预览，可编辑昵称与简介。
+- **社区/书评（已完成）**：帖子列表/详情/发帖、两层评论与点赞、删除自己的内容；书评写入/回复/点赞/删除；他人主页。
 - **下一步（P2）**：路由级代码分割、图片懒加载、首屏字体 preload、Lighthouse 与无障碍实测。
-- **暂未做**：社区（帖子/评论/点赞）、写书评/回复；后端接口已就绪，前端只差页面。
+- **暂未做**：我的书评/帖子列表（后端无按用户列内容的接口）、头像/帖子封面上传、社区治理。
 - **数据现状**：库内 30 本，评分/书评很少，详情页会正常显示空态；这不是前端 bug。
 
 ## 已知取舍

@@ -10,6 +10,10 @@ import { SearchPage } from '@/pages/SearchPage';
 import { RankPage } from '@/pages/RankPage';
 import { BookshelfPage } from '@/pages/BookshelfPage';
 import { ProfilePage } from '@/pages/ProfilePage';
+import { CommunityPage } from '@/pages/CommunityPage';
+import { PostDetailPage } from '@/pages/PostDetailPage';
+import { PostCreatePage } from '@/pages/PostCreatePage';
+import { UserProfilePage } from '@/pages/UserProfilePage';
 import { NovelDetailPage } from '@/pages/NovelDetailPage';
 import { CatalogPage } from '@/pages/CatalogPage';
 import { ReaderPage } from '@/pages/ReaderPage';
@@ -43,6 +47,10 @@ export default function App() {
                   <Route path="rank" element={<RankPage />} />
                   <Route path="bookshelf" element={<BookshelfPage />} />
                   <Route path="me" element={<ProfilePage />} />
+                  <Route path="community" element={<CommunityPage />} />
+                  <Route path="posts/new" element={<PostCreatePage />} />
+                  <Route path="posts/:id" element={<PostDetailPage />} />
+                  <Route path="users/:id" element={<UserProfilePage />} />
                   <Route path="novel/:id" element={<NovelDetailPage />} />
                   <Route path="novel/:id/chapters" element={<CatalogPage />} />
                   <Route path="styleguide" element={<StyleguidePage />} />

@@ -17,6 +17,13 @@ export const qk = {
     ['reviews', novelId, params] as const,
   bookshelf: ['bookshelf'] as const,
   userDetail: (id: number) => ['user', id] as const,
+  posts: (params: { sort?: 'hot' | 'latest'; novelId?: number; page?: number; size?: number }) =>
+    ['posts', params] as const,
+  post: (id: number) => ['post', id] as const,
+  postComments: (postId: number, params: PageParams) =>
+    ['post-comments', postId, params] as const,
+  reviewReplies: (reviewId: number, params: PageParams) =>
+    ['review-replies', reviewId, params] as const,
 };
 
 export function useCategories() {
@@ -131,6 +138,46 @@ export function useUserDetail(id: number) {
     queryFn: () => api.userDetail(id),
     enabled: Number.isFinite(id) && id > 0,
     staleTime: 60_000,
+  });
+}
+
+export function usePosts(
+  params: { sort?: 'hot' | 'latest'; novelId?: number; page?: number; size?: number } = {},
+) {
+  return useQuery({
+    queryKey: qk.posts(params),
+    queryFn: () => api.posts(params),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
+export function usePost(id: number) {
+  return useQuery({
+    queryKey: qk.post(id),
+    queryFn: () => api.post(id),
+    enabled: Number.isFinite(id) && id > 0,
+    staleTime: 60_000,
+    // 帖子详情浏览数 +1，和小说详情一样不做窗口聚焦重取
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function usePostComments(postId: number, params: PageParams = { page: 1, size: 50 }) {
+  return useQuery({
+    queryKey: qk.postComments(postId, params),
+    queryFn: () => api.postComments(postId, params),
+    enabled: Number.isFinite(postId) && postId > 0,
+    staleTime: 15_000,
+  });
+}
+
+export function useReviewReplies(reviewId: number, enabled = true) {
+  return useQuery({
+    queryKey: qk.reviewReplies(reviewId, { page: 1, size: 50 }),
+    queryFn: () => api.reviewReplies(reviewId, { page: 1, size: 50 }),
+    enabled: enabled && Number.isFinite(reviewId) && reviewId > 0,
+    staleTime: 15_000,
   });
 }
 
