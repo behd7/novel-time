@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
+import { useAuth } from '@/features/auth/AuthProvider';
 
 export function SiteFooter() {
+  const { user } = useAuth();
   return (
     <footer className="mt-24 border-t border-line">
       <div className="mx-auto max-w-[1240px] px-6 py-14 lg:px-10">
@@ -34,14 +36,25 @@ export function SiteFooter() {
                 </Link>
               </li>
               <li>
+                <Link className="transition-colors hover:text-ink" to="/bookshelf">
+                  我的书架
+                </Link>
+              </li>
+              <li>
                 <Link className="transition-colors hover:text-ink" to="/search">
                   搜索
                 </Link>
               </li>
               <li>
-                <Link className="transition-colors hover:text-ink" to="/login">
-                  登录 / 注册
-                </Link>
+                {user ? (
+                  <Link className="transition-colors hover:text-ink" to="/me">
+                    个人主页
+                  </Link>
+                ) : (
+                  <Link className="transition-colors hover:text-ink" to="/login">
+                    登录 / 注册
+                  </Link>
+                )}
               </li>
             </ul>
           </div>

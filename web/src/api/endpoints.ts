@@ -14,6 +14,7 @@ import type {
   SearchHit,
   SuggestItem,
   User,
+  UserDetail,
 } from './types';
 
 export type NovelListSort = 'latest' | 'newest' | 'wordCount' | 'hot';
@@ -84,6 +85,9 @@ export const api = {
     put<void>(`/bookshelf/${novelId}/progress`, { seq }),
 
   me: () => get<User>('/users/me'),
+  userDetail: (id: number) => get<UserDetail>(`/users/${id}`),
+  updateProfile: (body: { nickname?: string; bio?: string }) =>
+    put<User>('/users/me', body),
   login: (username: string, password: string) =>
     post<AuthResult>('/auth/login', { username, password }, { auth: false, retryOnUnauthorized: false }),
   register: (username: string, password: string, nickname?: string) =>

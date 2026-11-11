@@ -8,6 +8,8 @@ import { HomePage } from '@/pages/HomePage';
 import { BrowsePage } from '@/pages/BrowsePage';
 import { SearchPage } from '@/pages/SearchPage';
 import { RankPage } from '@/pages/RankPage';
+import { BookshelfPage } from '@/pages/BookshelfPage';
+import { ProfilePage } from '@/pages/ProfilePage';
 import { NovelDetailPage } from '@/pages/NovelDetailPage';
 import { CatalogPage } from '@/pages/CatalogPage';
 import { ReaderPage } from '@/pages/ReaderPage';
@@ -39,6 +41,8 @@ export default function App() {
                   <Route path="browse" element={<BrowsePage />} />
                   <Route path="search" element={<SearchPage />} />
                   <Route path="rank" element={<RankPage />} />
+                  <Route path="bookshelf" element={<BookshelfPage />} />
+                  <Route path="me" element={<ProfilePage />} />
                   <Route path="novel/:id" element={<NovelDetailPage />} />
                   <Route path="novel/:id/chapters" element={<CatalogPage />} />
                   <Route path="styleguide" element={<StyleguidePage />} />

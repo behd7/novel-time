@@ -157,6 +157,19 @@ export interface User {
   createdAt: string;
 }
 
+export interface UserStats {
+  userId: number;
+  bookshelfCount: number;
+  reviewCount: number;
+  postCount: number;
+  likeReceived: number;
+}
+
+export interface UserDetail {
+  user: User;
+  stat: UserStats;
+}
+
 export interface AuthResult {
   accessToken: string;
   refreshToken: string;

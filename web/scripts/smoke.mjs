@@ -49,6 +49,11 @@ async function main() {
   });
 
   try {
+    console.log('0. 未登录访问书架');
+    await page.goto(`${BASE}/bookshelf`);
+    await page.getByText('登录后才能使用书架').waitFor({ timeout: 8_000 });
+    assert(true, '未登录访问书架显示登录提示');
+
     console.log('1. 登录与刷新页面');
     await page.goto(`${BASE}/login`);
     await page.getByRole('button', { name: '一键填入' }).click();
@@ -162,15 +167,61 @@ async function main() {
     await page.getByText('上次停在第 2 章').waitFor({ timeout: 8_000 });
     assert(true, '继续阅读读到服务端书架进度');
 
-    console.log('7. 退出登录');
+    console.log('7. 书架页');
+    await page.goto(`${BASE}/bookshelf`);
+    await page.getByRole('heading', { name: '我的书架' }).waitFor({ timeout: 10_000 });
+    await page.getByText('剑来风雪').first().waitFor({ timeout: 8_000 });
+    assert(
+      (await page.locator('body').innerText()).includes('读到第 2 章'),
+      '书架页显示真实阅读进度',
+    );
+
+    await page.goto(`${BASE}/novel/11`);
+    const addEleven = page.getByRole('button', { name: /已在书架|加入书架/ }).first();
+    if ((await addEleven.innerText()).includes('加入书架')) {
+      await addEleven.click();
+      await page.getByText('已加入书架').waitFor({ timeout: 8_000 });
+    }
+    await page.goto(`${BASE}/bookshelf`);
+    await page.getByText('北境无雪').first().waitFor({ timeout: 8_000 });
+    assert(true, '书架页出现新加入的书');
+
+    const elevenCard = page.locator('article').filter({ hasText: '北境无雪' });
+    await elevenCard.getByRole('button', { name: '移出' }).click();
+    await elevenCard.getByRole('button', { name: '确认移出' }).click();
+    await page.getByText('已移出书架').waitFor({ timeout: 8_000 });
+    await page.waitForFunction(() => !document.body.innerText.includes('北境无雪'), null, {
+      timeout: 8_000,
+    });
+    assert(true, '书架可移出书籍');
+
+    console.log('8. 个人主页');
+    await page.goto(`${BASE}/me`);
+    await page.getByRole('heading', { name: '书虫' }).waitFor({ timeout: 10_000 });
+    await page.getByText('@bookworm').first().waitFor({ timeout: 8_000 });
+    assert(true, '个人主页显示账号信息');
+    await page.getByText('获赞').waitFor({ timeout: 8_000 });
+    assert(true, '个人主页显示后端统计');
+    await page.getByText('正在读').waitFor({ timeout: 8_000 });
+    await page.getByText('剑来风雪').first().waitFor({ timeout: 8_000 });
+    assert(true, '个人主页显示正在读的书');
+
+    await page.getByRole('button', { name: '编辑资料' }).click();
+    await page.getByLabel('个性签名').fill('读书，写字，偶尔走神。');
+    await page.getByRole('button', { name: '保存' }).click();
+    await page.getByText('资料已更新').waitFor({ timeout: 8_000 });
+    await page.getByText('读书，写字，偶尔走神。').waitFor({ timeout: 8_000 });
+    assert(true, '个人资料可编辑并回显');
+
+    console.log('9. 退出登录');
     await page.getByText('书虫').first().click();
-    await page.getByText('退出登录').click();
+    await page.getByRole('menuitem', { name: '退出登录' }).click();
     await page.locator('header').getByText('登录', { exact: true }).waitFor({ timeout: 8_000 });
     assert(true, '退出后页头恢复登录入口');
 
-    console.log('8. 控制台');
+    console.log('10. 控制台');
+    if (errors.length) console.log(errors.slice(0, 8));
     assert(errors.length === 0, `无控制台错误（实际 ${errors.length} 条）`);
-    if (errors.length) console.log(errors.slice(0, 5));
   } finally {
     await browser.close();
   }

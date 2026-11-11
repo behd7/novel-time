@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { hasRefreshToken } from './client';
 import { api, type NovelListParams, type PageParams, type SearchParams } from './endpoints';
 
 export const qk = {
@@ -15,6 +16,7 @@ export const qk = {
   reviews: (novelId: number, params: { sort?: string; page?: number; size?: number }) =>
     ['reviews', novelId, params] as const,
   bookshelf: ['bookshelf'] as const,
+  userDetail: (id: number) => ['user', id] as const,
 };
 
 export function useCategories() {
@@ -112,12 +114,32 @@ export function useReviews(
   });
 }
 
+export function useBookshelfPage(page = 1, size = 50) {
+  const { isAuthenticated } = useAuth();
+  return useQuery({
+    queryKey: ['bookshelf', 'page', page, size] as const,
+    queryFn: () => api.bookshelf({ page, size }),
+    // 登出时 clearSession 先清令牌、state 后更新；只看 user 会让这一帧仍去取书架并吃 401
+    enabled: isAuthenticated && hasRefreshToken(),
+    staleTime: 30_000,
+  });
+}
+
+export function useUserDetail(id: number) {
+  return useQuery({
+    queryKey: qk.userDetail(id),
+    queryFn: () => api.userDetail(id),
+    enabled: Number.isFinite(id) && id > 0,
+    staleTime: 60_000,
+  });
+}
+
 export function useBookshelf() {
   const { isAuthenticated } = useAuth();
   return useQuery({
     queryKey: qk.bookshelf,
     queryFn: () => api.bookshelf({ page: 1, size: 20 }),
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && hasRefreshToken(),
     staleTime: 30_000,
   });
 }

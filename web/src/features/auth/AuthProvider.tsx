@@ -28,6 +28,7 @@ interface AuthContextValue {
   login: (username: string, password: string) => Promise<User>;
   register: (username: string, password: string, nickname?: string) => Promise<User>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<User>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -77,9 +78,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onSessionExpired(() => {
         setUser(null);
         setStatus('anonymous');
-        queryClient.clear();
+        // 不在这里 clear 缓存：清缓存会让仍挂着的观察者立刻重取一次，
+        // 而令牌已经清空，控制台会留下一次无意义的 401。私有查询由 enabled 关掉；
+        // 下一次登录时 login/register 会统一 clear，不会看到上一个账号的数据。
       }),
-    [queryClient],
+    [],
   );
 
   const login = useCallback(
@@ -106,6 +109,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [queryClient],
   );
 
+  const refreshUser = useCallback(async () => {
+    const me = await api.me();
+    setUser(me);
+    setStatus('authenticated');
+    return me;
+  }, []);
+
   const logout = useCallback(async () => {
     const token = getRefreshToken();
     try {
@@ -113,10 +123,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // 登出接口是幂等的；网络失败也要把本地会话清掉
     } finally {
-      clearSession();
       setUser(null);
       setStatus('anonymous');
-      queryClient.clear();
+      clearSession();
     }
   }, [queryClient]);
 
@@ -128,8 +137,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       register,
       logout,
+      refreshUser,
     }),
-    [user, status, login, register, logout],
+    [user, status, login, register, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

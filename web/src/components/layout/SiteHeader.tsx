@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown, LogOut, Menu, Search, X } from 'lucide-react';
+import { ChevronDown, Library, LogOut, Menu, Search, UserRound, X } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useToast } from '@/components/ui/Toast';
 import { Avatar } from '@/components/ui/Avatar';
@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn';
 const NAV = [
   { to: '/browse', label: '书库' },
   { to: '/rank', label: '榜单' },
+  { to: '/bookshelf', label: '书架' },
 ];
 
 export function SiteHeader() {
@@ -107,13 +108,29 @@ export function SiteHeader() {
                     <p className="mt-0.5 truncate text-[11.5px] text-muted">@{user.username}</p>
                   </div>
                   <div className="p-1.5">
-                    <p className="px-2.5 py-2 text-[11.5px] text-faint">
-                      书架与个人主页在下一阶段开放
-                    </p>
+                    <Link
+                      to="/bookshelf"
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-[5px] px-2.5 py-2 text-left text-[13px] text-ink-soft transition-colors hover:bg-paper-deep"
+                    >
+                      <Library size={14} />
+                      我的书架
+                    </Link>
+                    <Link
+                      to="/me"
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 rounded-[5px] px-2.5 py-2 text-left text-[13px] text-ink-soft transition-colors hover:bg-paper-deep"
+                    >
+                      <UserRound size={14} />
+                      个人主页
+                    </Link>
+                    <div className="my-1 border-t border-line" />
                     <button
                       type="button"
-                      onClick={() => {
-                        logout();
+                      onClick={async () => {
+                        // 必须等 logout 清完令牌再跳：否则首页会在"用户还在、令牌已空"的缝隙里
+                        // 挂载并请求书架，控制台留下一次 401
+                        await logout();
                         toast('已退出登录');
                         navigate('/');
                       }}
@@ -166,7 +183,19 @@ export function SiteHeader() {
                 {item.label}
               </NavLink>
             ))}
-            {!user ? (
+            {user ? (
+              <NavLink
+                to="/me"
+                className={({ isActive }) =>
+                  cn(
+                    'rounded-[5px] px-2 py-2.5 text-sm',
+                    isActive ? 'text-ink' : 'text-muted',
+                  )
+                }
+              >
+                我的主页
+              </NavLink>
+            ) : (
               <Link
                 to="/login"
                 state={{ from: location.pathname }}
@@ -174,7 +203,7 @@ export function SiteHeader() {
               >
                 登录 / 注册
               </Link>
-            ) : null}
+            )}
           </nav>
         </div>
       ) : null}
