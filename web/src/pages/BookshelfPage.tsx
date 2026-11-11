@@ -63,7 +63,8 @@ export function BookshelfPage() {
 
   const sorted = [...filtered].sort((a, b) => {
     if (sort === 'added') return b.addedAt.localeCompare(a.addedAt);
-    return b.lastReadAt.localeCompare(a.lastReadAt);
+    // 未开始读的书没有 lastReadAt（后端省略 null），退回到加入时间，别让排序崩掉
+    return (b.lastReadAt ?? b.addedAt).localeCompare(a.lastReadAt ?? a.addedAt);
   });
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));

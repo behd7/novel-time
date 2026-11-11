@@ -79,6 +79,7 @@ async function main() {
     locale: 'zh-CN',
   });
   const page = await context.newPage();
+  let postUrl = '';
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
@@ -217,7 +218,8 @@ async function main() {
     const addEleven = page.getByRole('button', { name: /已在书架|加入书架/ }).first();
     if ((await addEleven.innerText()).includes('加入书架')) {
       await addEleven.click();
-      await page.getByText('已加入书架').waitFor({ timeout: 8_000 });
+      // 等按钮状态而不是等 toast：提示条是装饰，状态才是结果
+      await page.getByRole('button', { name: '已在书架' }).waitFor({ timeout: 8_000 });
     }
     await page.goto(`${BASE}/bookshelf`);
     await page.getByText('北境无雪').first().waitFor({ timeout: 8_000 });
@@ -226,7 +228,6 @@ async function main() {
     const elevenCard = page.locator('article').filter({ hasText: '北境无雪' });
     await elevenCard.getByRole('button', { name: '移出' }).click();
     await elevenCard.getByRole('button', { name: '确认移出' }).click();
-    await page.getByText('已移出书架').waitFor({ timeout: 8_000 });
     await page.waitForFunction(() => !document.body.innerText.includes('北境无雪'), null, {
       timeout: 8_000,
     });
@@ -245,10 +246,14 @@ async function main() {
 
     await page.getByRole('button', { name: '编辑资料' }).click();
     await page.getByLabel('个性签名').fill('读书，写字，偶尔走神。');
+    await page.getByLabel('性别').selectOption('1');
+    await page.getByLabel('生日').fill('2000-01-01');
     await page.getByRole('button', { name: '保存' }).click();
     await page.getByText('资料已更新').waitFor({ timeout: 8_000 });
     await page.getByText('读书，写字，偶尔走神。').waitFor({ timeout: 8_000 });
-    assert(true, '个人资料可编辑并回显');
+    await page.getByText('男').first().waitFor({ timeout: 8_000 });
+    await page.getByText('2000-01-01').first().waitFor({ timeout: 8_000 });
+    assert(true, '个人资料、性别与生日可编辑并回显');
 
     console.log('9. 社区发帖、评论与回复');
     await page.goto(`${BASE}/community`);
@@ -263,6 +268,7 @@ async function main() {
     await page.getByRole('button', { name: '发布帖子' }).click();
     await page.waitForURL(/\/posts\/\d+$/, { timeout: 10_000 });
     await page.getByRole('heading', { name: '冒烟帖子：剑来风雪' }).waitFor({ timeout: 8_000 });
+    postUrl = page.url();
     assert(
       (await page.getByText('[[ref:0]]').count()) === 0,
       '帖子引用占位符已替换成书卡',
@@ -280,13 +286,6 @@ async function main() {
     await page.getByText('冒烟回复内容').waitFor({ timeout: 8_000 });
     assert(true, '楼中楼回复可发表');
 
-    await page.getByRole('button', { name: '删除' }).first().click();
-    await page.getByRole('button', { name: '确认删除' }).first().click();
-    await page.waitForURL(/\/community$/, { timeout: 8_000 });
-    await page.waitForFunction(() => !document.body.innerText.includes('冒烟帖子：剑来风雪'), null, {
-      timeout: 8_000,
-    });
-    assert(true, '帖子可删除');
 
     console.log('10. 写书评与回复');
     await page.goto(`${BASE}/novel/10`);
@@ -304,19 +303,37 @@ async function main() {
     await page.getByText('冒烟回复书评').waitFor({ timeout: 8_000 });
     assert(true, '书评回复可发表');
 
-    console.log('11. 他人主页');
+    console.log('11. 我的书评/帖子列表');
+    await page.goto(`${BASE}/me`);
+    await page.getByText('我的内容').waitFor({ timeout: 8_000 });
+    await page.getByText('冒烟书评：风雪与断剑。').waitFor({ timeout: 8_000 });
+    assert(true, '我的书评列表显示刚发布的书评');
+    await page.getByRole('tab', { name: /我的帖子/ }).click();
+    await page.getByText('冒烟帖子：剑来风雪').waitFor({ timeout: 8_000 });
+    assert(true, '我的帖子列表显示刚发布的帖子');
+
+    await page.goto(postUrl);
+    await page.getByRole('button', { name: '删除' }).first().click();
+    await page.getByRole('button', { name: '确认删除' }).first().click();
+    await page.waitForURL(/\/community$/, { timeout: 8_000 });
+    await page.waitForFunction(() => !document.body.innerText.includes('冒烟帖子：剑来风雪'), null, {
+      timeout: 8_000,
+    });
+    assert(true, '帖子可删除');
+
+    console.log('12. 他人主页');
     await page.goto(`${BASE}/users/18`);
     await page.getByRole('heading', { name: '联调读者' }).waitFor({ timeout: 8_000 });
     await page.getByText('公开范围').waitFor();
     assert(true, '他人主页显示公开资料与统计');
 
-    console.log('12. 退出登录');
+    console.log('13. 退出登录');
     await page.getByText('书虫').first().click();
     await page.getByRole('menuitem', { name: '退出登录' }).click();
     await page.locator('header').getByText('登录', { exact: true }).waitFor({ timeout: 8_000 });
     assert(true, '退出后页头恢复登录入口');
 
-    console.log('13. 控制台');
+    console.log('14. 控制台');
     if (errors.length) console.log(errors.slice(0, 8));
     assert(errors.length === 0, `无控制台错误（实际 ${errors.length} 条）`);
   } finally {

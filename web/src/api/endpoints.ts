@@ -20,6 +20,7 @@ import type {
   SuggestItem,
   User,
   UserDetail,
+  UserReview,
 } from './types';
 
 export type NovelListSort = 'latest' | 'newest' | 'wordCount' | 'hot';
@@ -91,8 +92,16 @@ export const api = {
 
   me: () => get<User>('/users/me'),
   userDetail: (id: number) => get<UserDetail>(`/users/${id}`),
-  updateProfile: (body: { nickname?: string; bio?: string }) =>
-    put<User>('/users/me', body),
+  updateProfile: (body: {
+    nickname?: string;
+    bio?: string;
+    gender?: number;
+    birthday?: string;
+  }) => put<User>('/users/me', body),
+  userReviews: (id: number, params: PageParams = {}) =>
+    get<PageResult<UserReview>>(`/users/${id}/reviews${query({ ...params })}`),
+  userPosts: (id: number, params: PageParams = {}) =>
+    get<PageResult<PostView>>(`/users/${id}/posts${query({ ...params })}`),
   login: (username: string, password: string) =>
     post<AuthResult>('/auth/login', { username, password }, { auth: false, retryOnUnauthorized: false }),
   register: (username: string, password: string, nickname?: string) =>

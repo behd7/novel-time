@@ -4,6 +4,12 @@ import com.novel.api.controller.dto.UpdateProfileRequest;
 import com.novel.api.security.SecurityUtils;
 import com.novel.common.result.Result;
 import com.novel.core.user.application.ProfileUpdate;
+import com.novel.common.result.PageQuery;
+import com.novel.common.result.PageResult;
+import com.novel.core.community.application.PostService;
+import com.novel.core.community.application.view.PostView;
+import com.novel.core.review.application.ReviewService;
+import com.novel.core.review.application.view.UserReviewView;
 import com.novel.core.user.application.UserDetailView;
 import com.novel.core.user.application.UserService;
 import com.novel.core.user.application.UserView;
@@ -16,6 +22,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -28,6 +35,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserController {
 
     private final UserService userService;
+    private final ReviewService reviewService;
+    private final PostService postService;
 
     @Operation(summary = "获取当前登录用户")
     @GetMapping("/me")
@@ -47,5 +56,27 @@ public class UserController {
     @GetMapping("/{id}")
     public Result<UserDetailView> detail(@PathVariable long id) {
         return Result.ok(userService.getDetail(id));
+    }
+
+    @Operation(summary = "用户的书评", description = "个人主页用；按创建时间倒序")
+    @GetMapping("/{id}/reviews")
+    public Result<PageResult<UserReviewView>> reviews(
+            @PathVariable long id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        int safeSize = Math.min(Math.max(size, 1), PageQuery.MAX_SIZE);
+        return Result.ok(reviewService.listByUser(id, Math.max(page, 1), safeSize,
+                SecurityUtils.currentUserIdOrNull()));
+    }
+
+    @Operation(summary = "用户的帖子", description = "个人主页用；按创建时间倒序")
+    @GetMapping("/{id}/posts")
+    public Result<PageResult<PostView>> posts(
+            @PathVariable long id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        int safeSize = Math.min(Math.max(size, 1), PageQuery.MAX_SIZE);
+        return Result.ok(postService.listByUser(id, Math.max(page, 1), safeSize,
+                SecurityUtils.currentUserIdOrNull()));
     }
 }

@@ -23,6 +23,9 @@ public interface ReviewRepository {
 
     PageResult<Review> pageByNovel(long novelId, ReviewSort sort, int page, int size);
 
+    /** 个人主页的"我的书评"：按用户查，按创建时间倒序。 */
+    PageResult<Review> pageByUser(long userId, int page, int size);
+
     /** 软删除：内容还在，但查询会过滤掉。保留是为了处理"楼中楼还在、主楼被删"的情况。 */
     boolean softDelete(long reviewId);
 

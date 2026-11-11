@@ -8,7 +8,7 @@ import { ButtonLink } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadError } from '@/components/ui/LoadError';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { formatCount, formatDate } from '@/lib/format';
+import { formatCount, formatDate, genderLabel } from '@/lib/format';
 import { NotFoundPage } from './NotFoundPage';
 
 export function UserProfilePage() {
@@ -78,6 +78,10 @@ export function UserProfilePage() {
               @{profile.username}
               <span className="mx-2 text-line-strong">·</span>
               加入于 {formatDate(profile.createdAt)}
+            </p>
+            <p className="mt-1 text-[11.5px] text-faint">
+              {genderLabel(profile.gender)}
+              {profile.birthday ? ` · 生日 ${formatDate(profile.birthday)}` : ''}
             </p>
             <p className="mt-3 max-w-[32rem] text-[13px] leading-[1.9] text-ink-soft">
               {profile.bio?.trim() ? profile.bio : 'TA 还没有写简介。'}

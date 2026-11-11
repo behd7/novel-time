@@ -13,7 +13,13 @@ import {
 } from 'lucide-react';
 import type { User } from '@/api/types';
 import { api } from '@/api/endpoints';
-import { qk, useBookshelfPage, useUserDetail } from '@/api/queries';
+import {
+  qk,
+  useBookshelfPage,
+  useUserDetail,
+  useUserPosts,
+  useUserReviews,
+} from '@/api/queries';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useToast } from '@/components/ui/Toast';
 import { Avatar } from '@/components/ui/Avatar';
@@ -21,8 +27,12 @@ import { Button, ButtonLink } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadError, errorMessage } from '@/components/ui/LoadError';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { Pagination } from '@/components/ui/Pagination';
+import { UnderlineTabs } from '@/components/ui/Segmented';
 import { NovelCover } from '@/components/book/NovelCover';
-import { formatCount, formatDate, readingPercent } from '@/lib/format';
+import { formatCount, formatDate, formatRelativeTime, genderLabel, readingPercent } from '@/lib/format';
+
+type ContentTab = 'reviews' | 'posts';
 
 export function ProfilePage() {
   const { user, status, refreshUser, logout } = useAuth();
@@ -33,6 +43,10 @@ export function ProfilePage() {
   const detailQuery = useUserDetail(user?.id ?? 0);
   const shelfQuery = useBookshelfPage(1, 50);
   const [editing, setEditing] = useState(false);
+  const [contentTab, setContentTab] = useState<ContentTab>('reviews');
+  const [contentPage, setContentPage] = useState(1);
+  const reviewsPage = useUserReviews(user?.id ?? 0, contentPage, 6);
+  const postsPage = useUserPosts(user?.id ?? 0, contentPage, 6);
 
   if (status === 'loading') {
     return (
@@ -271,6 +285,54 @@ export function ProfilePage() {
       <section className="mt-12 border-t border-line/70 pt-10">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
+            <p className="text-[10.5px] tracking-[0.28em] text-accent">MY WRITING</p>
+            <h2 className="mt-2 font-serif text-[24px] font-semibold text-ink">我的内容</h2>
+          </div>
+          <p className="text-[11.5px] text-faint">
+            书评 {stats ? formatCount(stats.reviewCount) : '—'} · 帖子{' '}
+            {stats ? formatCount(stats.postCount) : '—'}
+          </p>
+        </div>
+
+        <UnderlineTabs
+          className="mt-5"
+          options={[
+            {
+              value: 'reviews',
+              label: '我的书评',
+              hint: stats ? `(${stats.reviewCount})` : '',
+            },
+            {
+              value: 'posts',
+              label: '我的帖子',
+              hint: stats ? `(${stats.postCount})` : '',
+            },
+          ]}
+          value={contentTab}
+          onChange={(value) => {
+            setContentTab(value);
+            setContentPage(1);
+          }}
+        />
+
+        {contentTab === 'reviews' ? (
+          <MyReviews
+            query={reviewsPage}
+            page={contentPage}
+            onPage={setContentPage}
+          />
+        ) : (
+          <MyPosts
+            query={postsPage}
+            page={contentPage}
+            onPage={setContentPage}
+          />
+        )}
+      </section>
+
+      <section className="mt-12 border-t border-line/70 pt-10">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
             <p className="text-[10.5px] tracking-[0.28em] text-accent">ACCOUNT</p>
             <h2 className="mt-2 font-serif text-[24px] font-semibold text-ink">账号</h2>
           </div>
@@ -292,6 +354,16 @@ export function ProfilePage() {
             <dt className="text-[10.5px] tracking-[0.16em] text-faint">加入时间</dt>
             <dd className="mt-1 text-ink-soft">{formatDate(profile.createdAt)}</dd>
           </div>
+          <div>
+            <dt className="text-[10.5px] tracking-[0.16em] text-faint">性别</dt>
+            <dd className="mt-1 text-ink-soft">{genderLabel(profile.gender)}</dd>
+          </div>
+          <div>
+            <dt className="text-[10.5px] tracking-[0.16em] text-faint">生日</dt>
+            <dd className="mt-1 text-ink-soft">
+              {profile.birthday ? formatDate(profile.birthday) : '未设置'}
+            </dd>
+          </div>
         </dl>
       </section>
 
@@ -303,6 +375,143 @@ export function ProfilePage() {
         />
       ) : null}
     </div>
+  );
+}
+
+function MyReviews({
+  query,
+  page,
+  onPage,
+}: {
+  query: ReturnType<typeof useUserReviews>;
+  page: number;
+  onPage: (page: number) => void;
+}) {
+  if (query.isError) {
+    return <LoadError className="mt-5" error={query.error} onRetry={() => void query.refetch()} />;
+  }
+  if (query.isLoading) {
+    return (
+      <div className="mt-5 space-y-4">
+        {Array.from({ length: 3 }, (_, index) => (
+          <div key={index} className="space-y-2 border-b border-line/60 py-4">
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-4 w-full" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  const items = query.data?.list ?? [];
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        className="mt-5"
+        title="还没有写过书评"
+        description="读完一本书，把最想说的那句话留下来。"
+        action={<ButtonLink to="/browse" variant="secondary" size="sm">去书库逛逛</ButtonLink>}
+      />
+    );
+  }
+  return (
+    <>
+      <div className="mt-2 divide-y divide-line/60">
+        {items.map((item) => (
+          <Link
+            key={item.id}
+            to={`/novel/${item.novelId}`}
+            className="group block py-4 first:pt-3"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="font-serif text-[15px] text-ink transition-colors group-hover:text-accent">
+                《{item.novelTitle}》
+              </p>
+              {item.score ? (
+                <span className="text-[11px] text-gold">{item.score} 星</span>
+              ) : null}
+            </div>
+            <p className="mt-1.5 line-clamp-2 text-[12.5px] leading-[1.85] text-muted">
+              {item.content}
+            </p>
+            <p className="mt-1.5 text-[10.5px] text-faint">
+              {formatRelativeTime(item.createdAt)} · {formatCount(item.likeCount)} 赞 ·{' '}
+              {formatCount(item.replyCount)} 回复
+            </p>
+          </Link>
+        ))}
+      </div>
+      <Pagination
+        className="mt-6"
+        page={query.data?.page ?? page}
+        total={query.data?.total ?? 0}
+        size={6}
+        onChange={onPage}
+      />
+    </>
+  );
+}
+
+function MyPosts({
+  query,
+  page,
+  onPage,
+}: {
+  query: ReturnType<typeof useUserPosts>;
+  page: number;
+  onPage: (page: number) => void;
+}) {
+  if (query.isError) {
+    return <LoadError className="mt-5" error={query.error} onRetry={() => void query.refetch()} />;
+  }
+  if (query.isLoading) {
+    return (
+      <div className="mt-5 space-y-4">
+        {Array.from({ length: 3 }, (_, index) => (
+          <div key={index} className="space-y-2 border-b border-line/60 py-4">
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-4 w-full" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  const items = query.data?.list ?? [];
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        className="mt-5"
+        title="还没有发过帖子"
+        description="社区里可以聊书，也可以只写一段读完的感受。"
+        action={<ButtonLink to="/posts/new" variant="secondary" size="sm">写第一条帖子</ButtonLink>}
+      />
+    );
+  }
+  return (
+    <>
+      <div className="mt-2 divide-y divide-line/60">
+        {items.map((item) => (
+          <Link key={item.id} to={`/posts/${item.id}`} className="group block py-4 first:pt-3">
+            <p className="font-serif text-[15px] text-ink transition-colors group-hover:text-accent">
+              {item.title}
+            </p>
+            <p className="mt-1.5 line-clamp-2 text-[12.5px] leading-[1.85] text-muted">
+              {item.summary}
+            </p>
+            <p className="mt-1.5 text-[10.5px] text-faint">
+              {formatRelativeTime(item.createdAt)} · {formatCount(item.likeCount)} 赞 ·{' '}
+              {formatCount(item.commentCount)} 评论
+            </p>
+          </Link>
+        ))}
+      </div>
+      <Pagination
+        className="mt-6"
+        page={query.data?.page ?? page}
+        total={query.data?.total ?? 0}
+        size={6}
+        onChange={onPage}
+      />
+    </>
   );
 }
 
@@ -337,8 +546,11 @@ function ProfileEditDialog({
 }) {
   const [nickname, setNickname] = useState(profile.nickname);
   const [bio, setBio] = useState(profile.bio ?? '');
+  const [gender, setGender] = useState(profile.gender ?? 0);
+  const [birthday, setBirthday] = useState(profile.birthday ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const today = new Date().toISOString().slice(0, 10);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -351,10 +563,19 @@ function ProfileEditDialog({
       setError('个性签名最长 255 个字符');
       return;
     }
+    if (birthday && birthday >= today) {
+      setError('生日必须是过去的日期');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      const updated = await api.updateProfile({ nickname: nextNickname, bio: bio.trim() });
+      const updated = await api.updateProfile({
+        nickname: nextNickname,
+        bio: bio.trim(),
+        gender,
+        birthday: birthday || undefined,
+      });
       await onSaved(updated);
     } catch (caught) {
       setError(errorMessage(caught));
@@ -416,6 +637,33 @@ function ProfileEditDialog({
             className="mt-1.5 w-full resize-none rounded-[6px] border border-line bg-paper/60 px-3 py-2.5 text-[13.5px] leading-relaxed text-ink placeholder:text-faint focus:border-line-strong focus:outline-none"
           />
         </label>
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-[11.5px] text-muted">性别</span>
+            <select
+              aria-label="性别"
+              value={String(gender)}
+              onChange={(event) => setGender(Number(event.target.value))}
+              className="mt-1.5 h-10 w-full rounded-[6px] border border-line bg-paper/60 px-2 text-[13px] text-ink focus:border-line-strong focus:outline-none"
+            >
+              <option value="0">未设置</option>
+              <option value="1">男</option>
+              <option value="2">女</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[11.5px] text-muted">生日</span>
+            <input
+              aria-label="生日"
+              type="date"
+              value={birthday}
+              max={today}
+              onChange={(event) => setBirthday(event.target.value)}
+              className="mt-1.5 h-10 w-full rounded-[6px] border border-line bg-paper/60 px-2 text-[13px] text-ink focus:border-line-strong focus:outline-none"
+            />
+          </label>
+        </div>
 
         {error ? (
           <p className="mt-3 rounded-[6px] border border-danger/25 bg-danger-soft px-3 py-2 text-[12px] text-danger">

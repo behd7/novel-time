@@ -27,6 +27,9 @@ public interface PostRepository {
 
     PageResult<Post> page(PostQuery query);
 
+    /** 个人主页的"我的帖子"：按用户查，按创建时间倒序。 */
+    PageResult<Post> pageByUser(long userId, int page, int size);
+
     List<PostRef> findRefs(long postId);
 
     /** 软删除：内容还在，查询会过滤掉。楼中楼可能还引用着主楼，不能物理删。 */

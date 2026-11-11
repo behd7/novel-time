@@ -17,6 +17,8 @@ export const qk = {
     ['reviews', novelId, params] as const,
   bookshelf: ['bookshelf'] as const,
   userDetail: (id: number) => ['user', id] as const,
+  userReviews: (id: number, params: PageParams) => ['user-reviews', id, params] as const,
+  userPosts: (id: number, params: PageParams) => ['user-posts', id, params] as const,
   posts: (params: { sort?: 'hot' | 'latest'; novelId?: number; page?: number; size?: number }) =>
     ['posts', params] as const,
   post: (id: number) => ['post', id] as const,
@@ -138,6 +140,24 @@ export function useUserDetail(id: number) {
     queryFn: () => api.userDetail(id),
     enabled: Number.isFinite(id) && id > 0,
     staleTime: 60_000,
+  });
+}
+
+export function useUserReviews(id: number, page = 1, size = 6) {
+  return useQuery({
+    queryKey: qk.userReviews(id, { page, size }),
+    queryFn: () => api.userReviews(id, { page, size }),
+    enabled: Number.isFinite(id) && id > 0,
+    staleTime: 30_000,
+  });
+}
+
+export function useUserPosts(id: number, page = 1, size = 6) {
+  return useQuery({
+    queryKey: qk.userPosts(id, { page, size }),
+    queryFn: () => api.userPosts(id, { page, size }),
+    enabled: Number.isFinite(id) && id > 0,
+    staleTime: 30_000,
   });
 }
 

@@ -69,3 +69,10 @@ export function readingPercent(seq: number, total: number): number {
 export function chapterLabel(seq: number): string {
   return `第 ${seq} 章`;
 }
+
+/** 后端 0 未知 / 1 男 / 2 女；未设置与未知都显示"未设置"。 */
+export function genderLabel(value: number | null | undefined): string {
+  if (value === 1) return '男';
+  if (value === 2) return '女';
+  return '未设置';
+}

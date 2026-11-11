@@ -3,11 +3,13 @@ package com.novel.core.review.application;
 import com.novel.common.exception.BizException;
 import com.novel.common.result.PageResult;
 import com.novel.common.result.ResultCode;
+import com.novel.core.novel.domain.Novel;
 import com.novel.core.novel.port.NovelRepository;
 import com.novel.core.rank.domain.RankAction;
 import com.novel.core.rank.port.RankScoreStore;
 import com.novel.core.review.application.view.ReviewReplyView;
 import com.novel.core.review.application.view.ReviewView;
+import com.novel.core.review.application.view.UserReviewView;
 import com.novel.core.review.domain.LikeTargetType;
 import com.novel.core.review.domain.Review;
 import com.novel.core.review.domain.ReviewReply;
@@ -73,6 +75,36 @@ public class ReviewService {
         List<ReviewView> views = reviews.getList().stream()
                 .map(review -> toView(review, profiles.get(review.userId()), likedIds.contains(review.id())))
                 .toList();
+        return PageResult.of(views, reviews.getTotal(), reviews.getPage(), reviews.getSize());
+    }
+
+    /** 个人主页的"我的书评"：按用户查，带书名声。 */
+    public PageResult<UserReviewView> listByUser(long userId, int page, int size, Long currentUserId) {
+        PageResult<Review> reviews = reviewRepository.pageByUser(userId, page, size);
+        if (reviews.getList().isEmpty()) {
+            return PageResult.of(List.of(), reviews.getTotal(), reviews.getPage(), reviews.getSize());
+        }
+
+        Map<Long, UserProfile> profiles = ProfileLoader.load(userRepository,
+                reviews.getList().stream().map(Review::userId).toList());
+        Map<Long, Novel> novels = novelRepository.findByIds(
+                        reviews.getList().stream().map(Review::novelId).toList())
+                .stream().collect(Collectors.toMap(Novel::id, Function.identity(), (a, b) -> a));
+        Set<Long> likedIds = currentUserId == null ? Set.of()
+                : likeRepository.likedTargetIds(LikeTargetType.REVIEW,
+                reviews.getList().stream().map(Review::id).toList(), currentUserId);
+
+        List<UserReviewView> views = reviews.getList().stream().map(review -> {
+            UserProfile profile = profiles.get(review.userId());
+            Novel novel = novels.get(review.novelId());
+            return new UserReviewView(review.id(), review.novelId(),
+                    novel == null ? "未知作品" : novel.title(),
+                    review.userId(),
+                    profile == null ? "" : profile.nickname(),
+                    profile == null ? null : profile.avatarKey(),
+                    review.content(), review.score(), review.likeCount(), review.replyCount(),
+                    likedIds.contains(review.id()), review.createdAt());
+        }).toList();
         return PageResult.of(views, reviews.getTotal(), reviews.getPage(), reviews.getSize());
     }
 

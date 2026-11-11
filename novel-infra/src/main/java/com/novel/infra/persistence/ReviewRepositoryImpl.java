@@ -74,6 +74,17 @@ public class ReviewRepositoryImpl implements ReviewRepository {
     }
 
     @Override
+    public PageResult<Review> pageByUser(long userId, int pageNum, int size) {
+        Page<ReviewEntity> page = reviewMapper.selectPage(new Page<>(pageNum, size),
+                Wrappers.<ReviewEntity>lambdaQuery()
+                        .eq(ReviewEntity::getUserId, userId)
+                        .orderByDesc(ReviewEntity::getCreatedAt)
+                        .orderByDesc(ReviewEntity::getId));
+        List<Review> reviews = page.getRecords().stream().map(this::toDomain).toList();
+        return PageResult.of(reviews, page.getTotal(), pageNum, size);
+    }
+
+    @Override
     public boolean softDelete(long reviewId) {
         // 实体上有 @TableLogic，deleteById 会变成 UPDATE deleted = 1
         return reviewMapper.deleteById(reviewId) > 0;

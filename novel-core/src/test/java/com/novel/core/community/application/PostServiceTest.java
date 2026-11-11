@@ -1,13 +1,16 @@
 package com.novel.core.community.application;
 
 import com.novel.common.exception.BizException;
+import com.novel.common.result.PageResult;
 import com.novel.common.result.ResultCode;
+import com.novel.core.community.application.view.PostView;
 import com.novel.core.community.domain.Post;
 import com.novel.core.community.domain.PostComment;
 import com.novel.core.community.port.PostRepository;
 import com.novel.core.novel.port.NovelRepository;
 import com.novel.core.review.domain.LikeTargetType;
 import com.novel.core.review.port.LikeRepository;
+import com.novel.core.user.domain.UserProfile;
 import com.novel.core.user.port.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,7 +20,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,6 +57,28 @@ class PostServiceTest {
 
     @InjectMocks
     private PostService postService;
+
+    @Test
+    @DisplayName("按用户查帖子：带作者昵称与当前用户点赞状态")
+    void listByUser_assemblesProfileAndLiked() {
+        Post post = new Post(POST_ID, AUTHOR_ID, "标题", "正文内容", null, 3, 2, 1,
+                LocalDateTime.now());
+        when(postRepository.pageByUser(AUTHOR_ID, 1, 10))
+                .thenReturn(PageResult.of(List.of(post), 1, 1, 10));
+        when(userRepository.findProfiles(List.of(AUTHOR_ID)))
+                .thenReturn(List.of(new UserProfile(AUTHOR_ID, "温酒", null, null, 1, null)));
+        when(likeRepository.likedTargetIds(LikeTargetType.POST, List.of(POST_ID), USER_ID))
+                .thenReturn(Set.of(POST_ID));
+
+        PageResult<PostView> page = postService.listByUser(AUTHOR_ID, 1, 10, USER_ID);
+
+        assertThat(page.getTotal()).isEqualTo(1);
+        assertThat(page.getList()).hasSize(1);
+        PostView view = page.getList().get(0);
+        assertThat(view.title()).isEqualTo("标题");
+        assertThat(view.nickname()).isEqualTo("温酒");
+        assertThat(view.liked()).isTrue();
+    }
 
     @Test
     @DisplayName("详情自增浏览数影响 0 行：直接返回帖子不存在，不再查一次")

@@ -180,6 +180,21 @@ export interface AuthResult {
   user: User;
 }
 
+export interface UserReview {
+  id: number;
+  novelId: number;
+  novelTitle: string;
+  userId: number;
+  nickname: string;
+  avatarKey?: string | null;
+  content: string;
+  score?: number | null;
+  likeCount: number;
+  replyCount: number;
+  liked: boolean;
+  createdAt: string;
+}
+
 export interface PostView {
   id: number;
   userId: number;
@@ -247,6 +262,7 @@ export interface BookshelfItem extends BookCoverInfo {
   totalChapters: number;
   lastChapterSeq: number;
   hasUpdate: boolean;
-  lastReadAt: string;
+  /** 未开始读的书后端会省略该字段 */
+  lastReadAt?: string | null;
   addedAt: string;
 }

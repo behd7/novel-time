@@ -397,7 +397,7 @@ Client
 
 **对象存储**（`StorageConfig` → `S3StorageAdapter`）：AWS SDK 走 S3 协议，`pathStyleAccessEnabled(true)`（MinIO 必需），`S3Client` 与 `S3Presigner` 的 endpoint/region/凭证必须完全一致。`StorageBootstrap`（`@Order(100)` 的 `ApplicationRunner`）启动时幂等建 bucket 并设公共读策略，失败只打 warn 不影响启动。
 
-**MySQL / Flyway**：迁移脚本在 `novel-api/src/main/resources/db/migration`，`V1__init_schema.sql` + `V2__seed_categories.sql` + `V3__add_novel_version.sql` + `V4__backfill_novel_review_count.sql`，共 21 张业务表 + `flyway_schema_history`。MyBatis-Plus 拦截器顺序固定为 **分页 → 乐观锁 → 防全表攻击**，分页 `maxLimit=50`。
+**MySQL / Flyway**：迁移脚本在 `novel-api/src/main/resources/db/migration`，`V1__init_schema.sql` + `V2__seed_categories.sql` + `V3__add_novel_version.sql` + `V4__backfill_novel_review_count.sql` + `V5__add_user_content_indexes.sql`，共 21 张业务表 + `flyway_schema_history`。MyBatis-Plus 拦截器顺序固定为 **分页 → 乐观锁 → 防全表攻击**，分页 `maxLimit=50`。
 
 **ES**（`SearchProperties` → `EsNovelSearchAdapter`）：
 
@@ -508,10 +508,10 @@ java -cp novel-api/target/classes com.novel.api.importing.demo.DemoNovelWriter d
 cd web && pnpm install
 cd web && pnpm dev                        # http://127.0.0.1:5173，/api 代理到 8080
 cd web && pnpm typecheck && pnpm build
-cd web && pnpm smoke                      # 34 条真实后端断言；需后端 + 演示数据 + dev 在跑
+cd web && pnpm smoke                      # 36 条真实后端断言；需后端 + 演示数据 + dev 在跑
 
 # 测试
-mvn test                                  # 187 个用例，含 Testcontainers（需 Docker）
+mvn test                                  # 189 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
 mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
 mvn test -Dtest=AuthFlowIntegrationTest   # 认证链路端到端
@@ -548,20 +548,21 @@ mvn test -Dtest=DemoNovelWriterTest,DemoNovelImportTest \
 - [x] **F2 演示数据**：28 本虚构书（8 类）确定性生成器 + `deploy/samples/demo` + 导入链路定向测试
 - [x] **F3 前后端联调**：9 个页面接真实 API（TanStack Query、令牌轮换、单飞刷新、错误态/空态/骨架屏），`web/src/mocks` 删除
 - [x] **F4 书架与个人主页**：书架筛选/移出/继续阅读、个人资料编辑、后端统计/正在读/书架预览
-- [x] **F5 社区与书评**：帖子列表/详情/发帖、两层评论与点赞、书评写入/回复/点赞/删除、他人主页，34 条真实后端冒烟
+- [x] **F5 社区与书评**：帖子列表/详情/发帖、两层评论与点赞、书评写入/回复/点赞/删除、他人主页
+- [x] **F6 资料字段与我的内容**：性别/生日编辑、按用户查书评/帖子、个人主页内容列表，36 条真实后端冒烟
 - [ ] M7 工程收尾（压测 / CI / 架构图）
 
 ### 2.12 前端（web/，已接真实接口）
 
 技术栈见 2.2；目录与运行方式见 `web/README.md`，设计决策见 `docs/03-前端设计.md`。
 
-- **状态**：15 个页面全部调用真实接口，`web/src/mocks` 已删除；演示账号 `bookworm / novel123456` 是后端真实账号。书架、个人主页、社区（帖子/评论/点赞）、书评写入/回复、他人主页均已接通。
+- **状态**：15 个页面全部调用真实接口，`web/src/mocks` 已删除；演示账号 `bookworm / novel123456` 是后端真实账号。书架、个人主页（含性别/生日与我的书评/帖子）、社区（帖子/评论/点赞）、书评写入/回复、他人主页均已接通。
 - **请求层**：`src/api/client.ts` 负责 `Result<T>` 解包、`ApiError`、access 内存 + refresh localStorage、单飞刷新与 401 重放一次；`endpoints.ts` 集中所有路径；`queries.ts` 是 TanStack Query hooks。
 - **数据**：分类由 `CategoryProvider` 统一提供；页面不手拼 URL，不各自缓存。详情查询 `staleTime=5min`、全站 `refetchOnWindowFocus:false`——详情接口每次调用阅读数 +1。
 - **样式**：Tailwind 4 的 `@theme` 是唯一 token 源；封面无素材时按「书名 + 作者」确定性生成，有 `coverKey` 时用 MinIO 真图。
 - **接口类型**：手抄在 `web/src/api/types.ts`，字段以 Java record 的 JSON 输出为准；可空字段会被后端省略，类型写成可选。
 - **联调**：Vite 把 `/api` 代理到 `127.0.0.1:8080`，后端不需要 CORS；生产由 Nginx 同域转发。
-- **验证**：`pnpm typecheck`、`pnpm build`、`pnpm smoke`（34 条断言，需后端 + 演示数据 + dev 在跑）。
+- **验证**：`pnpm typecheck`、`pnpm build`、`pnpm smoke`（36 条断言，需后端 + 演示数据 + dev 在跑）。
 
 ---
 

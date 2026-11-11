@@ -103,6 +103,18 @@ public class PostRepositoryImpl implements PostRepository {
     }
 
     @Override
+    public PageResult<Post> pageByUser(long userId, int pageNum, int size) {
+        Page<PostEntity> page = postMapper.selectPage(new Page<>(pageNum, size),
+                Wrappers.<PostEntity>lambdaQuery()
+                        .eq(PostEntity::getUserId, userId)
+                        .eq(PostEntity::getStatus, 0)
+                        .orderByDesc(PostEntity::getCreatedAt)
+                        .orderByDesc(PostEntity::getId));
+        List<Post> posts = page.getRecords().stream().map(this::toDomain).toList();
+        return PageResult.of(posts, page.getTotal(), pageNum, size);
+    }
+
+    @Override
     public List<PostRef> findRefs(long postId) {
         return postRefMapper.selectList(Wrappers.<PostRefEntity>lambdaQuery()
                         .eq(PostRefEntity::getPostId, postId)

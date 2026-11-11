@@ -77,6 +77,8 @@ public class SecurityConfig {
                         // 顺序要点：更精确的 /users/me 必须排在 /users/* 前面
                         .requestMatchers(HttpMethod.GET, "/api/v1/users/me").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/users/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/users/*/reviews").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/users/*/posts").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(new RestAuthenticationEntryPoint(objectMapper))

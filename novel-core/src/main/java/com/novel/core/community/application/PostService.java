@@ -81,6 +81,25 @@ public class PostService {
         return PageResult.of(views, posts.getTotal(), posts.getPage(), posts.getSize());
     }
 
+    /** 个人主页的"我的帖子"：按用户查，按创建时间倒序。 */
+    public PageResult<PostView> listByUser(long userId, int page, int size, Long currentUserId) {
+        PageResult<Post> posts = postRepository.pageByUser(userId, page, size);
+        if (posts.getList().isEmpty()) {
+            return PageResult.of(List.of(), posts.getTotal(), posts.getPage(), posts.getSize());
+        }
+
+        Map<Long, UserProfile> profiles = ProfileLoader.load(userRepository,
+                posts.getList().stream().map(Post::userId).toList());
+        Set<Long> likedIds = currentUserId == null ? Set.of()
+                : likeRepository.likedTargetIds(LikeTargetType.POST,
+                posts.getList().stream().map(Post::id).toList(), currentUserId);
+
+        List<PostView> views = posts.getList().stream()
+                .map(post -> toView(post, profiles.get(post.userId()), likedIds.contains(post.id())))
+                .toList();
+        return PageResult.of(views, posts.getTotal(), posts.getPage(), posts.getSize());
+    }
+
     /** 详情会累加一次浏览数；浏览数不进热帖公式，避免刷阅读量影响排序。 */
     public PostDetailView detail(long postId, Long currentUserId) {
         // 自增本身就是存在性检查：帖子不存在、已删或已隐藏时影响 0 行
