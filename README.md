@@ -209,6 +209,30 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
 
 导完自动退出；**同名书会跳过**，所以命令可以放心重跑。
 
+#### 28 本演示书
+
+`deploy/samples/demo/` 下是 28 本虚构演示书，覆盖 8 个顶级分类，每本 8–12 章。
+它们由 `DemoNovelWriter` 确定性生成（同一份书库连续生成两次，文件逐字节一致）：
+
+```bash
+# 重新生成（纯 JDK，不连库）
+java -cp novel-api/target/classes com.novel.api.importing.demo.DemoNovelWriter deploy/samples/demo
+
+# 走同一条 import 链路入库
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
+  --spring.profiles.active=import --novel.import.dir=deploy/samples/demo
+```
+
+分段逻辑：每类题材 16 段、24 个章节标题；一章取 7 段，章节之间错开 3 段，
+所以同一本书前 10 章不会出现两章完全一样。正文是占位文本，真实演示应替换成公版书或授权内容。
+
+定向测试（不跑全量）：
+
+```bash
+mvn -pl novel-api -am test -Dtest=DemoNovelWriterTest,DemoNovelImportTest \
+  -Dsurefire.failIfNoSpecifiedTests=false
+```
+
 ### 缓存与计数
 
 - 章节正文缓存 2 小时（`novel:chapter:text:{id}`），分类缓存 10 分钟（`novel:categories`）

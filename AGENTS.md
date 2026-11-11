@@ -302,6 +302,7 @@ com.novel.api
 │               BookshelfController, RatingController, ReviewController, PostController,
 │               SearchController, RankController, FileController, SystemController, dto/*}
 ├── importing/{NovelImportRunner, NovelReindexRunner, RankRefreshRunner}   # @Profile("import" / "reindex" / "rank")，跑完 System.exit
+│               demo/{DemoNovelLibrary, DemoNovelWriter, DemoProse, DemoNovel}  # 纯 JDK 演示数据生成器，不依赖 Spring
 ├── security/{JwtAuthenticationFilter, RestAuthenticationEntryPoint, RestAccessDeniedHandler,
 │             SecurityResponses, LoginUser, SecurityUtils}
 └── web/{TraceIdFilter, ResponseTraceAdvice, GlobalExceptionHandler}
@@ -500,6 +501,9 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active
 # 手动结算榜单（不起 Web；日/周/月/总四个周期各算一遍后退出）
 java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=rank
 
+# 生成 28 本演示书（纯 JDK，不连库）→ 再用上面的 import 命令导 deploy/samples/demo
+java -cp novel-api/target/classes com.novel.api.importing.demo.DemoNovelWriter deploy/samples/demo
+
 # 前端（web/）
 cd web && pnpm install
 cd web && pnpm dev                        # http://127.0.0.1:5173，/api 代理到 8080
@@ -525,6 +529,8 @@ mvn test -Dtest=SearchQueryTest            # 搜索入参边界
 mvn test -Dtest=RankPeriodTest             # 榜单周期归属，含 ISO 周跨年
 mvn test -Dtest=HotScoreCalculatorTest     # 热度公式边界（负计数、时钟回拨、除零）
 mvn test -Dtest=RankFlowIntegrationTest    # 行为→结算→读榜端到端
+mvn test -Dtest=DemoNovelWriterTest,DemoNovelImportTest \
+  -Dsurefire.failIfNoSpecifiedTests=false   # 演示数据生成与导入链路（不跑全量）
 ```
 
 自检入口：`/swagger-ui.html`、`/api/v1/system/ping`、`/api/v1/system/dependencies`（五项中间件实测）、`/actuator/health`。
@@ -539,6 +545,7 @@ mvn test -Dtest=RankFlowIntegrationTest    # 行为→结算→读榜端到端
 - [x] **M5 榜单**：日/周/月/总四榜（ISO 周对齐）、Redis ZSET 实时层 + 按用户/IP 按天去重、10 分钟结算快照（整份替换）、读缓存、`hot_score` 回写（不进索引，等每日重建）
 - [x] **M6 社区**：帖子（结构化引用小说卡片 + 占位符回显）、最新/最热列表、帖子点赞、两层评论与评论点赞、作者软删除、发帖/评论/点赞计数同步维护
 - [x] **F1 前端原型**：设计文档 + 9 个页面 + 程序化封面 + 15 条 Playwright 断言（数据仍为 mock）
+- [x] **F2 演示数据**：28 本虚构书（8 类）确定性生成器 + `deploy/samples/demo` + 导入链路定向测试
 - [ ] M7 工程收尾（压测 / CI / 架构图）
 
 ### 2.12 前端（web/，原型阶段）
