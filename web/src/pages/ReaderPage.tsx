@@ -11,9 +11,14 @@ import {
   Sun,
   X,
 } from 'lucide-react';
-import { getChapter, getNovel } from '@/mocks';
+import { api } from '@/api/endpoints';
+import { ApiError } from '@/api/client';
+import { useBookshelf, useChapter, useNovel } from '@/api/queries';
+import { useAuth } from '@/features/auth/AuthProvider';
 import { cn } from '@/lib/cn';
 import { saveProgress } from '@/lib/progress';
+import { LoadError } from '@/components/ui/LoadError';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { NotFoundPage } from './NotFoundPage';
 
 type Theme = 'paper' | 'sepia' | 'night';
@@ -49,8 +54,12 @@ export function ReaderPage() {
   const { id, seq } = useParams();
   const novelId = Number(id);
   const currentSeq = Number(seq);
-  const novel = getNovel(novelId);
-  const chapter = getChapter(novelId, currentSeq);
+  const { user } = useAuth();
+  const novelQuery = useNovel(novelId);
+  const chapterQuery = useChapter(novelId, currentSeq);
+  const shelfQuery = useBookshelf();
+  const novel = novelQuery.data;
+  const chapter = chapterQuery.data;
 
   const navigate = useNavigate();
   const [settings, setSettings] = useState<ReaderSettings>(readSettings);
@@ -58,6 +67,7 @@ export function ReaderPage() {
   const [toolbarVisible, setToolbarVisible] = useState(true);
   const [progress, setProgress] = useState(0);
   const lastY = useRef(0);
+  const syncedSeq = useRef<number | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const paragraphs = useMemo(
@@ -70,14 +80,23 @@ export function ReaderPage() {
   }, [settings]);
 
   useEffect(() => {
-    if (novel && chapter) {
-      saveProgress(novel.id, chapter.seq);
-      document.title = `${chapter.title} · ${novel.title} · 夜读`;
+    if (!novel || !chapter) return;
+    saveProgress(novel.id, chapter.seq);
+    document.title = `${chapter.title} · ${novel.title} · 夜读`;
+
+    // 登录且书在书架里才回写服务端进度；匿名阅读只记本地，不偷偷加书架
+    const inShelf = Boolean(shelfQuery.data?.list.some((item) => item.novelId === novel.id));
+    if (user && inShelf && syncedSeq.current !== chapter.seq) {
+      syncedSeq.current = chapter.seq;
+      void api.updateProgress(novel.id, chapter.seq).catch(() => {
+        // 进度是尽力而为，失败不打断阅读
+      });
     }
+
     return () => {
       document.title = '夜读 · 在字里行间遇见另一个世界';
     };
-  }, [novel, chapter]);
+  }, [novel, chapter, user, shelfQuery.data]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
@@ -123,14 +142,51 @@ export function ReaderPage() {
     return () => document.removeEventListener('mousedown', onClick);
   }, [settingsOpen]);
 
-  if (!novel || !chapter) {
-    return <NotFoundPage />;
-  }
-
   const style = {
     '--reader-size': `${settings.fontSize}px`,
     '--reader-leading': String(settings.leading),
   } as CSSProperties;
+
+  if (novelQuery.isLoading || chapterQuery.isLoading) {
+    return (
+      <div className="reader-shell min-h-screen" data-theme={settings.theme} style={style}>
+        <main className="mx-auto max-w-[42rem] px-6 pb-24 pt-24 sm:px-8 sm:pt-28">
+          <div className="mb-12 text-center">
+            <Skeleton className="mx-auto h-3 w-16" />
+            <Skeleton className="mx-auto mt-4 h-7 w-48" />
+          </div>
+          <div className="space-y-5">
+            {Array.from({ length: 8 }, (_, index) => (
+              <Skeleton key={index} className="h-4 w-full" />
+            ))}
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (novelQuery.isError || chapterQuery.isError) {
+    const error = novelQuery.error ?? chapterQuery.error;
+    const code = error instanceof ApiError ? error.code : 0;
+    if (code === 10201 || code === 10202 || code === 10301) {
+      return <NotFoundPage />;
+    }
+    return (
+      <div className="mx-auto max-w-[720px] px-6 py-20">
+        <LoadError
+          error={error}
+          onRetry={() => {
+            void novelQuery.refetch();
+            void chapterQuery.refetch();
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (!novel || !chapter) {
+    return <NotFoundPage />;
+  }
 
   return (
     <div className="reader-shell min-h-screen" data-theme={settings.theme} style={style}>

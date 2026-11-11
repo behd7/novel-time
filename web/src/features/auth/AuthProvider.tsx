@@ -2,69 +2,134 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { User } from '@/api/types';
-import { mockLogin, mockRegister } from '@/mocks';
+import { api } from '@/api/endpoints';
+import {
+  clearSession,
+  getRefreshToken,
+  hasRefreshToken,
+  onSessionExpired,
+  refreshSession,
+  setSession,
+} from '@/api/client';
 
-const STORAGE_KEY = 'novel.demo.user';
+export type AuthStatus = 'loading' | 'authenticated' | 'anonymous';
 
 interface AuthContextValue {
   user: User | null;
+  status: AuthStatus;
   isAuthenticated: boolean;
   login: (username: string, password: string) => Promise<User>;
   register: (username: string, password: string, nickname?: string) => Promise<User>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function readStoredUser(): User | null {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as User) : null;
-  } catch {
-    return null;
-  }
-}
-
+/**
+ * 登录态。
+ *
+ * <p>access 令牌只放内存，refresh 令牌落 localStorage；刷新页面时用 refresh 换一对新令牌，
+ * 再调 /users/me 恢复用户。刷新失败就按匿名处理，不阻断阅读。
+ */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(readStoredUser);
+  const queryClient = useQueryClient();
+  const [user, setUser] = useState<User | null>(null);
+  const [status, setStatus] = useState<AuthStatus>('loading');
 
-  const persist = useCallback((next: User | null) => {
-    setUser(next);
-    if (next) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } else {
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!hasRefreshToken()) {
+        if (alive) setStatus('anonymous');
+        return;
+      }
+      const access = await refreshSession();
+      if (!alive) return;
+      if (!access) {
+        setStatus('anonymous');
+        return;
+      }
+      try {
+        const me = await api.me();
+        if (alive) {
+          setUser(me);
+          setStatus('authenticated');
+        }
+      } catch {
+        clearSession();
+        if (alive) setStatus('anonymous');
+      }
+    })();
+    return () => {
+      alive = false;
+    };
   }, []);
+
+  useEffect(
+    () =>
+      onSessionExpired(() => {
+        setUser(null);
+        setStatus('anonymous');
+        queryClient.clear();
+      }),
+    [queryClient],
+  );
 
   const login = useCallback(
     async (username: string, password: string) => {
-      const result = await mockLogin(username, password);
-      persist(result.user);
-      return result.user;
+      const auth = await api.login(username, password);
+      setSession(auth);
+      setUser(auth.user);
+      setStatus('authenticated');
+      queryClient.clear();
+      return auth.user;
     },
-    [persist],
+    [queryClient],
   );
 
   const register = useCallback(
     async (username: string, password: string, nickname?: string) => {
-      const result = await mockRegister(username, password, nickname);
-      persist(result.user);
-      return result.user;
+      const auth = await api.register(username, password, nickname);
+      setSession(auth);
+      setUser(auth.user);
+      setStatus('authenticated');
+      queryClient.clear();
+      return auth.user;
     },
-    [persist],
+    [queryClient],
   );
 
-  const logout = useCallback(() => persist(null), [persist]);
+  const logout = useCallback(async () => {
+    const token = getRefreshToken();
+    try {
+      if (token) await api.logout(token);
+    } catch {
+      // 登出接口是幂等的；网络失败也要把本地会话清掉
+    } finally {
+      clearSession();
+      setUser(null);
+      setStatus('anonymous');
+      queryClient.clear();
+    }
+  }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, isAuthenticated: user != null, login, register, logout }),
-    [user, login, register, logout],
+    () => ({
+      user,
+      status,
+      isAuthenticated: user != null,
+      login,
+      register,
+      logout,
+    }),
+    [user, status, login, register, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

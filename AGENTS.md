@@ -188,7 +188,7 @@
 
 ### 2.1 定位
 
-小说阅读 + 社区平台：**模块化单体（Modular Monolith）后端 + React 阅读前端**。后端单进程部署，模块间靠 Maven 依赖方向与 ArchUnit 约束隔离，为将来拆分留口子；前端在 `web/`，当前是 mock 数据的高保真原型。
+小说阅读 + 社区平台：**模块化单体（Modular Monolith）后端 + React 阅读前端**。后端单进程部署，模块间靠 Maven 依赖方向与 ArchUnit 约束隔离，为将来拆分留口子；前端在 `web/`，已接真实接口（P1）。
 
 ### 2.2 技术栈
 
@@ -202,7 +202,7 @@
 | 对象存储 | MinIO（S3 协议） | 封面/头像/导入原文件，预签名直传 |
 | 持久层 | MyBatis-Plus 3.5.7 + Flyway | SQL 可控，schema 版本化 |
 | 文档 / 监控 | SpringDoc OpenAPI 3 + Actuator/Micrometer | Swagger 即接口演示界面 |
-| 前端 | React 19 + TypeScript + Vite 8 + Tailwind 4 | `web/`，不引组件库；数据仍为 mock |
+| 前端 | React 19 + TypeScript + Vite 8 + Tailwind 4 + TanStack Query 5 | `web/`，不引组件库；已接真实 API |
 
 ### 2.3 模块与依赖方向
 
@@ -212,7 +212,7 @@ novel/                      聚合 POM（pom.xml）
 ├── novel-core/             领域模型 + 应用服务 + 端口接口（不引 web/mybatis/redis/es）
 ├── novel-infra/            MyBatis、Redis、MQ、ES、MinIO、健康探针的适配器
 ├── novel-api/              Controller、全局异常、traceId、配置、启动类（装配根）
-└── web/                    React 前端（Vite + Tailwind；当前为 mock 数据原型）
+└── web/                    React 前端（Vite + Tailwind；已接真实接口）
 ```
 
 `web/` 不参与 Maven 构建与 ArchUnit 约束；它通过 HTTP 契约与后端耦合，接口类型手抄在
@@ -508,7 +508,7 @@ java -cp novel-api/target/classes com.novel.api.importing.demo.DemoNovelWriter d
 cd web && pnpm install
 cd web && pnpm dev                        # http://127.0.0.1:5173，/api 代理到 8080
 cd web && pnpm typecheck && pnpm build
-cd web && pnpm smoke                      # Playwright 冒烟，需另一个终端跑着 dev
+cd web && pnpm smoke                      # 18 条真实后端断言；需后端 + 演示数据 + dev 在跑
 
 # 测试
 mvn test                                  # 187 个用例，含 Testcontainers（需 Docker）
@@ -544,19 +544,22 @@ mvn test -Dtest=DemoNovelWriterTest,DemoNovelImportTest \
 - [x] **M4 搜索**：ES 索引 + 别名 + IK、Outbox 增量同步（投递确认 / 手动 ack / 死信）、手写 DSL 查询（高亮 / 筛选 / 五种排序）、搜索建议、每日全量重建（零停机切别名、写入失败不切换）
 - [x] **M5 榜单**：日/周/月/总四榜（ISO 周对齐）、Redis ZSET 实时层 + 按用户/IP 按天去重、10 分钟结算快照（整份替换）、读缓存、`hot_score` 回写（不进索引，等每日重建）
 - [x] **M6 社区**：帖子（结构化引用小说卡片 + 占位符回显）、最新/最热列表、帖子点赞、两层评论与评论点赞、作者软删除、发帖/评论/点赞计数同步维护
-- [x] **F1 前端原型**：设计文档 + 9 个页面 + 程序化封面 + 15 条 Playwright 断言（数据仍为 mock）
+- [x] **F1 前端原型**：设计文档 + 9 个页面 + 程序化封面 + Playwright 冒烟
 - [x] **F2 演示数据**：28 本虚构书（8 类）确定性生成器 + `deploy/samples/demo` + 导入链路定向测试
+- [x] **F3 前后端联调**：9 个页面接真实 API（TanStack Query、令牌轮换、单飞刷新、错误态/空态/骨架屏），`web/src/mocks` 删除，18 条真实后端冒烟
 - [ ] M7 工程收尾（压测 / CI / 架构图）
 
-### 2.12 前端（web/，原型阶段）
+### 2.12 前端（web/，已接真实接口）
 
 技术栈见 2.2；目录与运行方式见 `web/README.md`，设计决策见 `docs/03-前端设计.md`。
 
-- **状态**：9 个页面已实现，数据全部来自 `web/src/mocks`，**尚未调用后端接口**；演示账号是前端模拟登录，与 JWT 无关。
+- **状态**：9 个页面全部调用真实接口，`web/src/mocks` 已删除；演示账号 `bookworm / novel123456` 是后端真实账号。
+- **请求层**：`src/api/client.ts` 负责 `Result<T>` 解包、`ApiError`、access 内存 + refresh localStorage、单飞刷新与 401 重放一次；`endpoints.ts` 集中所有路径；`queries.ts` 是 TanStack Query hooks。
+- **数据**：分类由 `CategoryProvider` 统一提供；页面不手拼 URL，不各自缓存。详情查询 `staleTime=5min`、全站 `refetchOnWindowFocus:false`——详情接口每次调用阅读数 +1。
 - **样式**：Tailwind 4 的 `@theme` 是唯一 token 源；封面无素材时按「书名 + 作者」确定性生成，有 `coverKey` 时用 MinIO 真图。
-- **接口类型**：手抄在 `web/src/api/types.ts`，字段以 Java record 的 JSON 输出为准；改 View 时同步改这里。
+- **接口类型**：手抄在 `web/src/api/types.ts`，字段以 Java record 的 JSON 输出为准；可空字段会被后端省略，类型写成可选。
 - **联调**：Vite 把 `/api` 代理到 `127.0.0.1:8080`，后端不需要 CORS；生产由 Nginx 同域转发。
-- **验证**：`pnpm typecheck`、`pnpm build`、`pnpm smoke`（15 条断言，需 dev 在跑）。
+- **验证**：`pnpm typecheck`、`pnpm build`、`pnpm smoke`（18 条断言，需后端 + 演示数据 + dev 在跑）。
 
 ---
 

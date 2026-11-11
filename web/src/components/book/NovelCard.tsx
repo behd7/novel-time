@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
-import type { NovelSummary } from '@/api/types';
-import { categoryName } from '@/mocks/categories';
+import type { BookCoverInfo, NovelSummary } from '@/api/types';
+import { useCategoriesContext } from '@/features/categories/CategoryProvider';
 import { formatCount, formatRating, readingPercent } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { NovelCover } from './NovelCover';
@@ -14,6 +14,7 @@ interface NovelCardProps {
 }
 
 export function NovelCard({ novel, className, showRating = true }: NovelCardProps) {
+  const { nameOf } = useCategoriesContext();
   return (
     <Link to={`/novel/${novel.id}`} className={cn('group block', className)}>
       <div className="transition-transform duration-500 ease-soft group-hover:-translate-y-1">
@@ -25,7 +26,7 @@ export function NovelCard({ novel, className, showRating = true }: NovelCardProp
       <p className="mt-1 flex items-center gap-1.5 truncate text-xs text-muted">
         <span className="truncate">{novel.authorName}</span>
         <span className="text-line-strong">·</span>
-        <span className="shrink-0">{categoryName(novel.categoryId)}</span>
+        <span className="shrink-0">{nameOf(novel.categoryId)}</span>
       </p>
       {showRating ? (
         <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted">
@@ -48,6 +49,7 @@ interface NovelRowProps {
 
 /** 榜单 / 侧栏用的横排条目：一屏能放下十本，比卡片网格更适合"比较名次"。 */
 export function NovelRow({ novel, rankNo, score, className, showView = false }: NovelRowProps) {
+  const { nameOf } = useCategoriesContext();
   return (
     <Link
       to={`/novel/${novel.id}`}
@@ -72,7 +74,7 @@ export function NovelRow({ novel, rankNo, score, className, showView = false }: 
           {novel.title}
         </p>
         <p className="mt-0.5 truncate text-[11.5px] text-muted">
-          {novel.authorName} · {categoryName(novel.categoryId)}
+          {novel.authorName} · {nameOf(novel.categoryId)}
         </p>
       </div>
       {score != null ? (
@@ -89,7 +91,7 @@ export function NovelRow({ novel, rankNo, score, className, showView = false }: 
 }
 
 interface ContinueCardProps {
-  novel: NovelSummary;
+  novel: BookCoverInfo & { id: number };
   lastChapterSeq: number;
   totalChapters: number;
   className?: string;

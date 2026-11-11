@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRight,
   Check,
@@ -11,20 +12,21 @@ import {
 } from 'lucide-react';
 import { formatCount, formatRating, formatRelativeTime, formatWordCount } from '@/lib/format';
 import { designCover } from '@/lib/cover';
-import {
-  categoryName,
-  findBookshelfItem,
-  getNovel,
-  getRatingSummary,
-  listChapters,
-  listReviews,
-  similarNovels,
-  tagsOf,
-  topCategoryOf,
-} from '@/mocks';
 import { cn } from '@/lib/cn';
 import { loadProgress } from '@/lib/progress';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { useCategoriesContext } from '@/features/categories/CategoryProvider';
+import { api } from '@/api/endpoints';
+import { ApiError } from '@/api/client';
+import {
+  qk,
+  useBookshelf,
+  useChapters,
+  useNovel,
+  useNovels,
+  useRating,
+  useReviews,
+} from '@/api/queries';
 import { useToast } from '@/components/ui/Toast';
 import { NovelCover } from '@/components/book/NovelCover';
 import { NovelCard } from '@/components/book/NovelCard';
@@ -34,6 +36,8 @@ import { Tag, StatusDot } from '@/components/ui/Tag';
 import { UnderlineTabs } from '@/components/ui/Segmented';
 import { Avatar } from '@/components/ui/Avatar';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { LoadError, errorMessage } from '@/components/ui/LoadError';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { NotFoundPage } from './NotFoundPage';
 
 type Tab = 'catalog' | 'reviews';
@@ -41,64 +45,168 @@ type Tab = 'catalog' | 'reviews';
 export function NovelDetailPage() {
   const { id } = useParams();
   const novelId = Number(id);
-  const novel = getNovel(novelId);
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { nameOf, topOf } = useCategoriesContext();
   const { toast } = useToast();
 
+  const novelQuery = useNovel(novelId);
+  const chaptersQuery = useChapters(novelId, { page: 1, size: 12 });
+  const ratingQuery = useRating(novelId);
+  const shelfQuery = useBookshelf();
   const [tab, setTab] = useState<Tab>('catalog');
   const [expanded, setExpanded] = useState(false);
   const [ratingOpen, setRatingOpen] = useState(false);
-  const [myRating, setMyRating] = useState<number | null>(() =>
-    user ? (getRatingSummary(novelId, user.id).myScore ?? null) : null,
-  );
-  const [inShelf, setInShelf] = useState(() =>
-    Boolean(user && findBookshelfItem(novelId)),
-  );
   const [showAllReviews, setShowAllReviews] = useState(false);
-  const [liked, setLiked] = useState<Record<number, boolean>>({});
+  const reviewsQuery = useReviews(novelId, {
+    sort: 'hot',
+    page: 1,
+    size: showAllReviews ? 20 : 3,
+  });
 
-  const chapters = useMemo(() => listChapters(novelId, 1, 12), [novelId]);
-  const reviews = useMemo(
-    () => listReviews(novelId, 'hot', 1, showAllReviews ? 20 : 3),
-    [novelId, showAllReviews],
+  const novel = novelQuery.data;
+  const top = novel ? topOf(novel.categoryId) : undefined;
+  const similarQuery = useNovels(
+    { categoryId: top?.id, sort: 'hot', size: 5 },
+    Boolean(top),
   );
-  const similar = useMemo(() => similarNovels(novelId, 4), [novelId]);
 
-  if (!novel) {
+  const [myRatingOverride, setMyRatingOverride] = useState<number | null | undefined>(undefined);
+  const [shelfOverride, setShelfOverride] = useState<boolean | undefined>(undefined);
+  const [liked, setLiked] = useState<Record<number, boolean>>({});
+  const [ratingSaving, setRatingSaving] = useState(false);
+  const [shelfSaving, setShelfSaving] = useState(false);
+
+  if (!Number.isFinite(novelId) || novelId <= 0) {
     return <NotFoundPage />;
   }
 
+  if (novelQuery.isLoading) {
+    return (
+      <div className="mx-auto max-w-[1240px] px-6 py-10 lg:px-10">
+        <Skeleton className="h-4 w-44" />
+        <div className="mt-8 grid gap-10 sm:grid-cols-[220px_1fr] lg:gap-14">
+          <Skeleton className="aspect-[3/4] w-full max-w-[220px]" />
+          <div className="space-y-4">
+            <Skeleton className="h-6 w-32" />
+            <Skeleton className="h-10 w-3/5" />
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-20 w-full" />
+            <div className="flex gap-3 pt-3">
+              <Skeleton className="h-12 w-40" />
+              <Skeleton className="h-12 w-32" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (novelQuery.isError) {
+    const code = novelQuery.error instanceof ApiError ? novelQuery.error.code : 0;
+    if (code === 10201 || code === 10202) return <NotFoundPage />;
+    return (
+      <div className="mx-auto max-w-[1240px] px-6 py-16 lg:px-10">
+        <LoadError error={novelQuery.error} onRetry={() => void novelQuery.refetch()} />
+      </div>
+    );
+  }
+
+  if (!novel) return <NotFoundPage />;
+
   const design = designCover(novel.title, novel.authorName);
-  const top = topCategoryOf(novel.categoryId);
-  const shelfItem = user ? findBookshelfItem(novelId) : undefined;
+  const shelfItem = shelfQuery.data?.list.find((item) => item.novelId === novelId);
+  const inShelf = shelfOverride ?? Boolean(shelfItem);
   /** 本地进度优先：匿名阅读也算数，登录后书架里的进度只是兜底。 */
   const lastReadSeq = loadProgress(novelId) ?? shelfItem?.lastChapterSeq ?? null;
   const startSeq = lastReadSeq ?? 1;
+
+  const rating = ratingQuery.data;
+  const avgRating = rating?.avgRating ?? novel.avgRating;
+  const ratingCount = rating?.ratingCount ?? novel.ratingCount;
+  const myRating =
+    myRatingOverride !== undefined ? myRatingOverride : (rating?.myScore ?? null);
+
+  const chapters = chaptersQuery.data?.list ?? [];
+  const reviews = reviewsQuery.data?.list ?? [];
+  const reviewTotal = reviewsQuery.data?.total ?? 0;
+  const similar = (similarQuery.data?.list ?? []).filter((item) => item.id !== novelId).slice(0, 4);
 
   const requireLogin = () => {
     toast('登录后才能操作', 'error');
     navigate('/login', { state: { from: location.pathname } });
   };
 
-  const toggleShelf = () => {
+  const submitRating = async (score: number) => {
     if (!user) {
       requireLogin();
       return;
     }
-    setInShelf((current) => !current);
-    toast(inShelf ? '已从书架移除' : '已加入书架');
+    if (ratingSaving) return;
+    setRatingSaving(true);
+    try {
+      await api.rate(novelId, score);
+      setMyRatingOverride(score);
+      setRatingOpen(false);
+      toast(`已评 ${score} 星`);
+      // 只刷评分摘要；不要再刷详情，详情接口每次调用都会让阅读数 +1
+      await queryClient.invalidateQueries({ queryKey: qk.rating(novelId) });
+    } catch (error) {
+      toast(errorMessage(error), 'error');
+    } finally {
+      setRatingSaving(false);
+    }
   };
 
-  const submitRating = (score: number) => {
+  const toggleShelf = async () => {
     if (!user) {
       requireLogin();
       return;
     }
-    setMyRating(score);
-    setRatingOpen(false);
-    toast(`已评 ${score} 星`);
+    if (shelfSaving) return;
+    setShelfSaving(true);
+    const next = !inShelf;
+    try {
+      if (next) {
+        await api.addToShelf(novelId);
+      } else {
+        await api.removeFromShelf(novelId);
+      }
+      setShelfOverride(next);
+      toast(next ? '已加入书架' : '已从书架移除');
+      await queryClient.invalidateQueries({ queryKey: qk.bookshelf });
+    } catch (error) {
+      // 并发下"已在书架"是正常结果，不当成失败弹红
+      if (next && error instanceof ApiError && /已在书架/.test(error.message)) {
+        setShelfOverride(true);
+        await queryClient.invalidateQueries({ queryKey: qk.bookshelf });
+      } else {
+        toast(errorMessage(error), 'error');
+      }
+    } finally {
+      setShelfSaving(false);
+    }
+  };
+
+  const toggleLike = async (reviewId: number, currentlyLiked: boolean) => {
+    if (!user) {
+      requireLogin();
+      return;
+    }
+    setLiked((current) => ({ ...current, [reviewId]: !currentlyLiked }));
+    try {
+      if (currentlyLiked) {
+        await api.unlikeReview(reviewId);
+      } else {
+        await api.likeReview(reviewId);
+      }
+      await queryClient.invalidateQueries({ queryKey: ['reviews', novelId] });
+    } catch (error) {
+      setLiked((current) => ({ ...current, [reviewId]: currentlyLiked }));
+      toast(errorMessage(error), 'error');
+    }
   };
 
   return (
@@ -120,7 +228,7 @@ export function NovelDetailPage() {
               to={`/browse?category=${top?.id ?? novel.categoryId}`}
               className="transition-colors hover:text-ink"
             >
-              {top?.name ?? '未分类'}
+              {top?.name ?? nameOf(novel.categoryId)}
             </Link>
             <span className="text-faint">/</span>
             <span className="truncate text-ink-soft">{novel.title}</span>
@@ -137,7 +245,7 @@ export function NovelDetailPage() {
 
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <Tag tone="accent">{categoryName(novel.categoryId)}</Tag>
+                <Tag tone="accent">{nameOf(novel.categoryId)}</Tag>
                 <StatusDot status={novel.status} />
               </div>
 
@@ -154,14 +262,14 @@ export function NovelDetailPage() {
                 <div>
                   <div className="flex items-baseline gap-2">
                     <span className="font-serif text-[40px] leading-none text-ink">
-                      {formatRating(novel.avgRating)}
+                      {formatRating(avgRating)}
                     </span>
-                    <span className="text-[12px] text-faint">/ 5</span>
+                    {avgRating > 0 ? <span className="text-[12px] text-faint">/ 5</span> : null}
                   </div>
                   <div className="mt-2 flex items-center gap-2">
-                    <Stars value={novel.avgRating} size={14} />
+                    <Stars value={avgRating} size={14} />
                     <span className="text-[11.5px] text-muted">
-                      {formatCount(novel.ratingCount)} 人评分
+                      {formatCount(ratingCount)} 人评分
                     </span>
                   </div>
                 </div>
@@ -169,7 +277,8 @@ export function NovelDetailPage() {
                 <button
                   type="button"
                   onClick={() => (user ? setRatingOpen((open) => !open) : requireLogin())}
-                  className="group inline-flex items-center gap-2 text-[12.5px] text-muted transition-colors hover:text-accent"
+                  disabled={ratingSaving}
+                  className="group inline-flex items-center gap-2 text-[12.5px] text-muted transition-colors hover:text-accent disabled:opacity-50"
                 >
                   <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong transition-colors group-hover:border-accent/50 group-hover:bg-accent-soft">
                     <Star size={14} />
@@ -186,11 +295,21 @@ export function NovelDetailPage() {
               ) : null}
 
               <div className="mt-7 flex flex-wrap items-center gap-3">
-                <ButtonLink to={`/novel/${novel.id}/chapters/${startSeq}`} size="lg" className="w-full sm:w-auto">
+                <ButtonLink
+                  to={`/novel/${novel.id}/chapters/${startSeq}`}
+                  size="lg"
+                  className="w-full sm:w-auto"
+                >
                   {lastReadSeq ? `继续阅读 · 第 ${startSeq} 章` : '开始阅读'}
                   <ArrowRight size={15} />
                 </ButtonLink>
-                <Button variant="secondary" size="lg" onClick={toggleShelf} className="w-full sm:w-auto">
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  onClick={() => void toggleShelf()}
+                  disabled={shelfSaving}
+                  className="w-full sm:w-auto"
+                >
                   {inShelf ? <Check size={15} /> : <Plus size={15} />}
                   {inShelf ? '已在书架' : '加入书架'}
                 </Button>
@@ -235,9 +354,8 @@ export function NovelDetailPage() {
                 </button>
                 <span className="text-line-strong">·</span>
                 <div className="flex flex-wrap gap-1.5">
-                  {tagsOf(novel.id).map((tag) => (
-                    <Tag key={tag}>{tag}</Tag>
-                  ))}
+                  <Tag>{nameOf(novel.categoryId)}</Tag>
+                  <Tag>{novel.status === 1 ? '已完结' : '连载中'}</Tag>
                 </div>
               </div>
             </div>
@@ -249,7 +367,7 @@ export function NovelDetailPage() {
           <UnderlineTabs
             options={[
               { value: 'catalog', label: '目录', hint: `${novel.chapterCount} 章` },
-              { value: 'reviews', label: '书评', hint: `${novel.ratingCount} 人评分` },
+              { value: 'reviews', label: '书评', hint: `${formatCount(ratingCount)} 人评分` },
             ]}
             value={tab}
             onChange={setTab}
@@ -269,38 +387,70 @@ export function NovelDetailPage() {
                   <ArrowRight size={13} />
                 </Link>
               </div>
-              <div className="grid gap-x-10 sm:grid-cols-2">
-                {chapters.list.map((chapter) => {
-                  const isLastRead = lastReadSeq === chapter.seq;
-                  return (
-                    <Link
-                      key={chapter.seq}
-                      to={`/novel/${novel.id}/chapters/${chapter.seq}`}
-                      className="group flex items-center gap-3 border-b border-line/60 py-3"
-                    >
-                      <span
-                        className={cn(
-                          'w-8 shrink-0 font-serif text-[12.5px] tabular-nums',
-                          isLastRead ? 'text-accent' : 'text-faint',
-                        )}
+
+              {chaptersQuery.isError ? (
+                <LoadError
+                  className="mt-4"
+                  error={chaptersQuery.error}
+                  onRetry={() => void chaptersQuery.refetch()}
+                />
+              ) : chaptersQuery.isLoading ? (
+                <div className="grid gap-x-10 sm:grid-cols-2">
+                  {Array.from({ length: 8 }, (_, index) => (
+                    <Skeleton key={index} className="my-3 h-6 w-full" />
+                  ))}
+                </div>
+              ) : chapters.length === 0 ? (
+                <EmptyState className="mt-4" title="目录还是空的" description="作者还没有发布章节。" />
+              ) : (
+                <div className="grid gap-x-10 sm:grid-cols-2">
+                  {chapters.map((chapter) => {
+                    const isLastRead = lastReadSeq === chapter.seq;
+                    return (
+                      <Link
+                        key={chapter.seq}
+                        to={`/novel/${novel.id}/chapters/${chapter.seq}`}
+                        className="group flex items-center gap-3 border-b border-line/60 py-3"
                       >
-                        {String(chapter.seq).padStart(2, '0')}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink-soft transition-colors group-hover:text-accent">
-                        {chapter.title}
-                      </span>
-                      {isLastRead ? <Tag tone="accent">上次读到</Tag> : null}
-                      <span className="shrink-0 text-[11px] text-faint">
-                        {chapter.wordCount} 字
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
+                        <span
+                          className={cn(
+                            'w-8 shrink-0 font-serif text-[12.5px] tabular-nums',
+                            isLastRead ? 'text-accent' : 'text-faint',
+                          )}
+                        >
+                          {String(chapter.seq).padStart(2, '0')}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink-soft transition-colors group-hover:text-accent">
+                          {chapter.title}
+                        </span>
+                        {isLastRead ? <Tag tone="accent">上次读到</Tag> : null}
+                        <span className="shrink-0 text-[11px] text-faint">
+                          {chapter.wordCount} 字
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           ) : (
             <div className="py-6">
-              {reviews.list.length === 0 ? (
+              {reviewsQuery.isError ? (
+                <LoadError
+                  error={reviewsQuery.error}
+                  onRetry={() => void reviewsQuery.refetch()}
+                />
+              ) : reviewsQuery.isLoading ? (
+                <div className="space-y-5">
+                  {Array.from({ length: 3 }, (_, index) => (
+                    <div key={index} className="space-y-3 border-b border-line/60 py-5">
+                      <Skeleton className="h-8 w-40" />
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-2/3" />
+                    </div>
+                  ))}
+                </div>
+              ) : reviews.length === 0 ? (
                 <EmptyState
                   icon={<MessageCircle size={24} strokeWidth={1.3} />}
                   title="还没有人写书评"
@@ -308,13 +458,11 @@ export function NovelDetailPage() {
                 />
               ) : (
                 <div>
-                  {reviews.list.map((review) => {
+                  {reviews.map((review) => {
                     const isLiked = liked[review.id] ?? review.liked;
+                    const likeDelta = isLiked === review.liked ? 0 : isLiked ? 1 : -1;
                     return (
-                      <article
-                        key={review.id}
-                        className="border-b border-line/60 py-5 first:pt-1"
-                      >
+                      <article key={review.id} className="border-b border-line/60 py-5 first:pt-1">
                         <div className="flex items-center gap-3">
                           <Avatar name={review.nickname} size={32} />
                           <div>
@@ -336,20 +484,14 @@ export function NovelDetailPage() {
                         <div className="mt-3 flex items-center gap-5 text-[11.5px] text-muted">
                           <button
                             type="button"
-                            onClick={() => {
-                              if (!user) {
-                                requireLogin();
-                                return;
-                              }
-                              setLiked((current) => ({ ...current, [review.id]: !isLiked }));
-                            }}
+                            onClick={() => void toggleLike(review.id, isLiked)}
                             className={cn(
                               'inline-flex items-center gap-1.5 transition-colors hover:text-accent',
                               isLiked && 'text-accent',
                             )}
                           >
                             <ThumbsUp size={12} />
-                            {review.likeCount + (isLiked && !review.liked ? 1 : 0)}
+                            {review.likeCount + likeDelta}
                           </button>
                           <span className="inline-flex items-center gap-1.5">
                             <MessageCircle size={12} />
@@ -359,13 +501,13 @@ export function NovelDetailPage() {
                       </article>
                     );
                   })}
-                  {reviews.total > 3 && !showAllReviews ? (
+                  {reviewTotal > 3 && !showAllReviews ? (
                     <button
                       type="button"
                       onClick={() => setShowAllReviews(true)}
                       className="mt-5 text-[12.5px] text-accent transition-colors hover:text-accent-deep"
                     >
-                      查看全部 {reviews.total} 条书评
+                      查看全部 {reviewTotal} 条书评
                     </button>
                   ) : null}
                 </div>
@@ -385,11 +527,21 @@ export function NovelDetailPage() {
               去书库逛逛
             </Link>
           </div>
-          <div className="mt-7 grid grid-cols-2 gap-x-6 gap-y-9 sm:grid-cols-4">
-            {similar.map((item) => (
-              <NovelCard key={item.id} novel={item} showRating={false} />
-            ))}
-          </div>
+          {similarQuery.isLoading ? (
+            <div className="mt-7 grid grid-cols-2 gap-x-6 gap-y-9 sm:grid-cols-4">
+              {Array.from({ length: 4 }, (_, index) => (
+                <Skeleton key={index} className="aspect-[3/4] w-full" />
+              ))}
+            </div>
+          ) : similar.length === 0 ? (
+            <p className="mt-6 text-[12.5px] text-muted">同类作品还不多，去书库看看别的题材。</p>
+          ) : (
+            <div className="mt-7 grid grid-cols-2 gap-x-6 gap-y-9 sm:grid-cols-4">
+              {similar.map((item) => (
+                <NovelCard key={item.id} novel={item} showRating={false} />
+              ))}
+            </div>
+          )}
         </section>
       </div>
     </div>

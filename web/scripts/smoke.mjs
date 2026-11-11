@@ -1,22 +1,23 @@
 /**
- * 前端冒烟测试。
+ * 前端冒烟测试（真实后端版）。
  *
- * 不起测试框架，只用 Playwright 的浏览器 API：这些断言检查的是「页面能不能用」，
+ * 不起测试框架，只用 Playwright 的浏览器 API：断言的是「页面能不能用」，
  * 不是组件内部实现，所以没必要为它引入一整套 runner。
  *
  * 运行前：
- *   1. 另一个终端里 pnpm dev
- *   2. 首次运行 pnpm exec playwright install chromium
+ *   1. 后端在 127.0.0.1:8080，且已导入演示数据
+ *   2. 另一个终端里 pnpm dev
  *   3. pnpm smoke
  *
  * 环境变量：
- *   BASE_URL  默认 http://127.0.0.1:5173
- *   CHROME_PATH  指定本机 Chromium（可选，CI 里通常不用）
+ *   BASE_URL     默认 http://127.0.0.1:5173
+ *   CHROME_PATH  指定本机 Chromium（Playwright 版本与已装浏览器不匹配时用）
  */
 import { chromium } from 'playwright';
 
 const BASE = process.env.BASE_URL ?? 'http://127.0.0.1:5173';
 const EXECUTABLE = process.env.CHROME_PATH;
+const DEMO = { username: 'bookworm', password: 'novel123456' };
 
 let passed = 0;
 
@@ -48,67 +49,126 @@ async function main() {
   });
 
   try {
-    console.log('1. 登录流程');
+    console.log('1. 登录与刷新页面');
     await page.goto(`${BASE}/login`);
     await page.getByRole('button', { name: '一键填入' }).click();
-    assert((await page.getByPlaceholder('bookworm').inputValue()) === 'bookworm', '一键填入演示账号');
+    assert(
+      (await page.getByPlaceholder('bookworm').inputValue()) === DEMO.username,
+      '一键填入演示账号',
+    );
     await page.locator('button[type="submit"]').click();
-    await page.waitForURL(`${BASE}/`, { timeout: 8000 });
-    assert(page.url() === `${BASE}/`, '登录后回到首页');
-    await page.getByText('书虫').first().waitFor({ timeout: 5000 });
-    assert(await page.getByText('书虫').first().isVisible(), '页头显示昵称');
-    assert(await page.getByText('继续阅读').first().isVisible(), '登录后出现继续阅读模块');
+    await page.waitForURL(`${BASE}/`, { timeout: 10_000 });
+    await page.getByText('书虫').first().waitFor({ timeout: 8_000 });
+    assert(await page.getByText('书虫').first().isVisible(), '登录后页头显示真实昵称');
 
-    console.log('2. 评分');
-    await page.goto(`${BASE}/novel/1`);
-    await page.getByRole('button', { name: /你打了 5 星/ }).click();
-    await page.getByRole('radio', { name: '4 星' }).click();
-    await page.getByText('已评 4 星').waitFor({ timeout: 5000 });
-    assert(await page.getByText('你打了 4 星').isVisible(), '评分状态更新为 4 星');
+    await page.reload();
+    await page.getByText('书虫').first().waitFor({ timeout: 10_000 });
+    assert(await page.getByText('书虫').first().isVisible(), '刷新后靠 refresh 轮换恢复登录态');
 
-    console.log('3. 书架');
-    await page.getByRole('button', { name: '已在书架' }).click();
-    await page.getByText('已从书架移除').waitFor({ timeout: 5000 });
-    assert(await page.getByRole('button', { name: '加入书架' }).isVisible(), '书架状态可切换');
-    await page.getByRole('button', { name: '加入书架' }).click();
-    assert(await page.getByRole('button', { name: '已在书架' }).isVisible(), '再次加入书架');
+    console.log('2. 首页真实数据');
+    await page.getByText('本周热读').waitFor({ timeout: 10_000 });
+    await page.getByRole('link', { name: /剑来风雪/ }).first().waitFor({ timeout: 8_000 });
+    assert(true, '首页榜单读到真实作品');
+    await page.getByText('最近更新').waitFor();
+    const homeLinks = await page.locator('a[href^="/novel/"]').count();
+    assert(homeLinks > 5, `首页出现多本真实书的链接（${homeLinks} 个）`);
 
-    console.log('4. 阅读器');
-    await page.goto(`${BASE}/novel/1/chapters/3`);
+    console.log('3. 书库与搜索');
+    await page.goto(`${BASE}/browse`);
+    await page.waitForFunction(
+      () => {
+        const node = [...document.querySelectorAll('p')].find((item) =>
+          /共 \d+ 本/.test(item.textContent ?? ''),
+        );
+        return node != null && Number((node.textContent ?? '').match(/\d+/)?.[0] ?? 0) >= 28;
+      },
+      null,
+      { timeout: 10_000 },
+    );
+    const totalText = await page.getByText(/共 \d+ 本/).first().innerText();
+    const total = Number(totalText.match(/\d+/)?.[0] ?? 0);
+    assert(total >= 28, `书库总数来自后端（${total} 本，不再是 14 本 mock）`);
+
+    await page.goto(`${BASE}/`);
+    const search = page.getByPlaceholder('搜书名、作者、简介').first();
+    await search.fill('长安');
+    await page.getByRole('option').first().waitFor({ timeout: 6_000 });
+    assert(
+      (await page.getByRole('option').first().innerText()).includes('长安旧事'),
+      '搜索建议来自真实接口',
+    );
+    await search.press('Enter');
+    await page.waitForURL(/\/search\?q=/, { timeout: 10_000 });
+    await page.getByText('找到 2 本相关作品').waitFor({ timeout: 10_000 });
+    await page.getByText('长安旧事').first().waitFor({ timeout: 8_000 });
+    assert(true, '搜索结果数与后端一致（长安 = 2 本）');
+
+    await page.goto(`${BASE}/search?q=zzzznotfound`);
+    await page.getByText('没有找到相关作品').waitFor({ timeout: 8_000 });
+    assert(true, '搜索空态可见');
+
+    console.log('4. 详情、评分与书架');
+    await page.goto(`${BASE}/novel/10`);
+    await page.getByRole('heading', { name: '剑来风雪' }).waitFor({ timeout: 10_000 });
+    await page.getByText('山门初雪').first().waitFor();
+    assert(true, '详情与目录来自真实章节');
+
+    const rateButton = page
+      .getByRole('button', { name: /你打了 \d 星|给它打分/ })
+      .first();
+    await rateButton.click();
+    const currentRating = await rateButton.innerText();
+    const targetScore = currentRating.includes('5 星') ? 4 : 5;
+    await page.getByRole('radio', { name: `${targetScore} 星` }).click();
+    await page.getByText(new RegExp(`已评 ${targetScore} 星`)).waitFor({ timeout: 8_000 });
+    await page
+      .getByRole('button', { name: new RegExp(`你打了 ${targetScore} 星`) })
+      .waitFor();
+    assert(true, `评分真实落库并回显（${targetScore} 星）`);
+
+    const shelfButton = page.getByRole('button', { name: /已在书架|加入书架/ }).first();
+    if ((await shelfButton.innerText()).includes('加入书架')) {
+      await shelfButton.click();
+      await page.getByText('已加入书架').waitFor({ timeout: 8_000 });
+    }
+    await page.getByRole('button', { name: '已在书架' }).waitFor();
+    assert(true, '加入书架成功');
+
+    console.log('5. 阅读器与进度');
+    await page.goto(`${BASE}/novel/10/chapters/1`);
+    await page.getByRole('heading', { name: '山门初雪' }).waitFor({ timeout: 10_000 });
     await page.getByRole('button', { name: '阅读设置' }).click();
-    await page.getByText('阅读设置').first().waitFor({ timeout: 3000 });
+    await page.getByText('阅读设置').first().waitFor({ timeout: 4_000 });
     await page.getByRole('button', { name: '增大字号' }).click();
     await page.getByRole('button', { name: '增大字号' }).click();
     const saved = await page.evaluate(() => localStorage.getItem('novel.reader.settings'));
     assert(JSON.parse(saved).fontSize === 21, '字号持久化到 localStorage');
     await page.getByRole('button', { name: '关闭' }).click();
     await page.keyboard.press('ArrowRight');
-    await page.waitForURL(/\/novel\/1\/chapters\/4$/, { timeout: 5000 });
-    assert(page.url().endsWith('/chapters/4'), '键盘右方向键翻到下一章');
-    await page.waitForFunction(() => localStorage.getItem('novel.reader.progress.1') === '4', null, {
-      timeout: 5000,
+    await page.waitForURL(/\/novel\/10\/chapters\/2$/, { timeout: 8_000 });
+    await page.waitForFunction(() => localStorage.getItem('novel.reader.progress.10') === '2', null, {
+      timeout: 5_000,
     });
-    assert(true, '阅读进度写回 localStorage');
+    assert(true, '键盘右方向键翻章并写回本地进度');
+    await page.waitForTimeout(800);
 
-    console.log('5. 搜索');
+    console.log('6. 目录与继续阅读');
+    await page.goto(`${BASE}/novel/10/chapters`);
+    await page.getByText('剑冢').first().waitFor({ timeout: 8_000 });
+    assert(true, '目录页读到真实章节');
+
     await page.goto(`${BASE}/`);
-    const search = page.getByPlaceholder('搜书名、作者、简介').first();
-    await search.fill('长安');
-    await page.getByRole('option').first().waitFor({ timeout: 3000 });
-    assert(await page.getByRole('option').first().isVisible(), '输入时出现搜索建议');
-    await search.press('Enter');
-    await page.waitForURL(/\/search\?q=/, { timeout: 8000 });
-    await page.locator('h1').filter({ hasText: '的搜索结果' }).waitFor({ timeout: 5000 });
-    assert(true, '进入搜索结果页');
-    await page.getByText('长安旧事').first().waitFor({ timeout: 5000 });
-    assert(await page.getByText('长安旧事').first().isVisible(), '命中演示书目');
+    await page.getByText('继续阅读').first().waitFor({ timeout: 10_000 });
+    await page.getByText('上次停在第 2 章').waitFor({ timeout: 8_000 });
+    assert(true, '继续阅读读到服务端书架进度');
 
-    console.log('6. 空状态');
-    await page.goto(`${BASE}/search?q=不存在的书`);
-    await page.getByText('没有找到相关作品').waitFor({ timeout: 5000 });
-    assert(await page.getByText('没有找到相关作品').isVisible(), '搜索空态可见');
+    console.log('7. 退出登录');
+    await page.getByText('书虫').first().click();
+    await page.getByText('退出登录').click();
+    await page.locator('header').getByText('登录', { exact: true }).waitFor({ timeout: 8_000 });
+    assert(true, '退出后页头恢复登录入口');
 
-    console.log('7. 控制台');
+    console.log('8. 控制台');
     assert(errors.length === 0, `无控制台错误（实际 ${errors.length} 条）`);
     if (errors.length) console.log(errors.slice(0, 5));
   } finally {

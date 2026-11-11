@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { SearchX } from 'lucide-react';
-import { categoryName, searchNovels, topCategories, type SearchSort } from '@/mocks';
+import { useSearch } from '@/api/queries';
+import { useCategoriesContext } from '@/features/categories/CategoryProvider';
 import { formatCount, formatRating, formatRelativeTime, formatWordCount } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { NovelCover } from '@/components/book/NovelCover';
@@ -9,9 +9,12 @@ import { SearchBox } from '@/components/search/SearchBox';
 import { Segmented } from '@/components/ui/Segmented';
 import { Pagination } from '@/components/ui/Pagination';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { LoadError } from '@/components/ui/LoadError';
 import { NovelRowSkeleton } from '@/components/ui/Skeleton';
 import { Stars } from '@/components/ui/Stars';
 import { StatusDot, Tag } from '@/components/ui/Tag';
+
+type SearchSort = 'relevance' | 'latest' | 'hot' | 'rating' | 'wordCount';
 
 const SORT_OPTIONS: { value: SearchSort; label: string }[] = [
   { value: 'relevance', label: '相关度' },
@@ -21,37 +24,33 @@ const SORT_OPTIONS: { value: SearchSort; label: string }[] = [
   { value: 'wordCount', label: '字数' },
 ];
 
+const SORT_VALUES = new Set(SORT_OPTIONS.map((option) => option.value));
+
 const HOT_KEYWORDS = ['长安', '悬疑', '沈砚', '修真', '星际', '古言'];
 
 export function SearchPage() {
   const [params, setParams] = useSearchParams();
   const q = params.get('q') ?? '';
+  const { topCategories, nameOf } = useCategoriesContext();
   const categoryId = Number(params.get('category') ?? 0) || 0;
   const statusParam = params.get('status');
-  const status = statusParam === null ? undefined : Number(statusParam);
-  const sort = (params.get('sort') as SearchSort | null) ?? 'relevance';
+  const status =
+    statusParam === '0' || statusParam === '1' ? Number(statusParam) : undefined;
+  const rawSort = params.get('sort');
+  const sort: SearchSort =
+    rawSort && SORT_VALUES.has(rawSort as SearchSort) ? (rawSort as SearchSort) : 'relevance';
   const page = Math.max(1, Number(params.get('page') ?? 1) || 1);
-  const [pending, setPending] = useState(false);
 
-  const result = useMemo(
-    () =>
-      searchNovels({
-        q,
-        categoryId: categoryId || undefined,
-        status,
-        sort,
-        page,
-        size: 8,
-      }),
-    [q, categoryId, status, sort, page],
-  );
+  const { data, isFetching, isError, error, refetch } = useSearch({
+    q,
+    categoryId: categoryId || undefined,
+    status,
+    sort,
+    page,
+    size: 8,
+  });
 
-  useEffect(() => {
-    if (!q) return;
-    setPending(true);
-    const timer = window.setTimeout(() => setPending(false), 180);
-    return () => window.clearTimeout(timer);
-  }, [q, categoryId, status, sort, page]);
+  const result = data ?? { list: [], total: 0, page, size: 8, hasNext: false };
 
   const update = (next: Record<string, string | number | undefined>) => {
     const merged = new URLSearchParams(params);
@@ -123,7 +122,7 @@ export function SearchPage() {
           <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
             <p className="text-[12px] text-muted">
               找到 <span className="text-ink">{result.total}</span> 本相关作品
-              {categoryId ? ` · ${categoryName(categoryId)}` : ''}
+              {categoryId ? ` · ${nameOf(categoryId)}` : ''}
             </p>
             <div className="flex items-center gap-2">
               <div className="hidden items-center gap-1 sm:flex">
@@ -157,7 +156,9 @@ export function SearchPage() {
           </div>
 
           <div className="mt-4">
-            {pending ? (
+            {isError ? (
+              <LoadError className="mt-8" error={error} onRetry={() => void refetch()} />
+            ) : isFetching ? (
               <div className="divide-y divide-line/60">
                 <NovelRowSkeleton />
                 <NovelRowSkeleton />

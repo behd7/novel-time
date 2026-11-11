@@ -16,7 +16,7 @@
 | 对象存储 | MinIO（S3 协议） | 封面/头像/导入原文件 |
 | 持久层 | MyBatis-Plus 3.5.7 + Flyway | SQL 可控，schema 版本化 |
 | 文档 | SpringDoc OpenAPI 3 | `/swagger-ui.html` 就是接口演示界面 |
-| 前端 | React 19 + TS + Vite 8 + Tailwind 4 | `web/`，当前为 mock 数据的高保真原型 |
+| 前端 | React 19 + TS + Vite 8 + Tailwind 4 + TanStack Query | `web/`，已接真实 API |
 
 ## 模块划分
 
@@ -26,7 +26,7 @@ novel
 ├── novel-core     领域模型 + 应用服务 + 端口接口          （不引 web/mybatis/redis）
 ├── novel-infra    MyBatis、Redis、MQ、ES、MinIO 适配器
 ├── novel-api      Controller、全局异常、配置、启动类      （装配根）
-└── web            React 前端（Vite + Tailwind；当前为 mock 数据原型）
+└── web            React 前端（Vite + Tailwind；已接真实接口）
 ```
 
 依赖方向 `api → core ← infra`，由 [ArchitectureTest](novel-api/src/test/java/com/novel/api/ArchitectureTest.java) 强制校验，违规即构建失败。
@@ -107,26 +107,29 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar
 | http://127.0.0.1:8080/api/v1/system/ping | 存活探针 |
 | http://127.0.0.1:8080/api/v1/system/dependencies | **中间件体检**（MySQL/Redis/MQ/ES/MinIO + 搜索索引状态） |
 | http://127.0.0.1:8080/actuator/health | Actuator 健康检查 |
-| http://127.0.0.1:5173 | 前端原型（需先 `cd web && pnpm dev`） |
+| http://127.0.0.1:5173 | 前端（需先 `cd web && pnpm dev`，数据来自后端） |
 
 ## 前端（web/）
 
-React 19 + TypeScript + Vite + Tailwind 4 的高保真原型，覆盖「找书 → 读书」主线：
+React 19 + TypeScript + Vite + Tailwind 4 + TanStack Query，覆盖「找书 → 读书」主线：
 首页、书库、搜索、榜单、详情、目录、阅读器、登录/注册，外加一页设计系统。
+**已接入真实后端接口（P1）**，登录/评分/书架/阅读进度都落库，`web/src/mocks` 已删除。
 
 ![首页](docs/assets/frontend/home.jpg)
 
 ```bash
 cd web
 pnpm install
+pnpm seed:demo  # 首次/重置库后，确保演示账号 bookworm 存在
 pnpm dev        # http://127.0.0.1:5173，/api 自动代理到 8080
 ```
 
 - 设计说明：[docs/03-前端设计.md](docs/03-前端设计.md)
-- 演示账号：`bookworm / novel123456`（原型阶段是前端模拟登录）
-- 当前数据来自 `web/src/mocks`，后端不启动也能完整演示；P1 再接真实接口
+- 演示账号：`bookworm / novel123456`（后端真实账号，登录走 `POST /auth/login`；新库先 `pnpm seed:demo`）
+- 数据来自 MySQL / ES：先起后端并导入 `deploy/samples/demo`，前端才有书可看
+- 请求层：access 内存 + refresh 轮换 + 401 单飞刷新；详情接口有阅读数副作用，全站关闭窗口聚焦重取
 - 前后端同源部署，开发期走 Vite 代理，因此 **后端没有也不需要 CORS 配置**
-- 交互冒烟：`cd web && pnpm smoke`（需另一个终端在跑 `pnpm dev`，首次先 `pnpm exec playwright install chromium`）
+- 交互冒烟：`cd web && pnpm smoke`（需后端 + 演示数据 + 另一个终端跑 `pnpm dev`，共 18 条断言）
 
 ## 认证
 
@@ -330,7 +333,9 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active
 - [x] **M4 搜索**：ES 索引 + 别名 + IK、Outbox 增量同步（投递确认 / 手动 ack / 死信）、高亮与筛选排序、搜索建议、每日全量重建
 - [x] **M5 榜单**：日/周/月/总四榜、Redis ZSET 实时层（按人按天去重）、10 分钟结算快照、读缓存、`hot_score` 回写
 - [x] **M6 社区**：帖子 + 结构化小说引用（卡片回显、按书反查）、最新/最热列表、帖子与评论点赞、两层评论、作者软删除、计数同步维护
-- [x] **F1 前端原型**：设计文档 + 9 个页面 + 程序化封面 + 15 条 Playwright 断言（数据仍为 mock）
+- [x] **F1 前端原型**：设计文档 + 9 个页面 + 程序化封面 + Playwright 冒烟
+- [x] **F2 演示数据**：28 本虚构书（8 类）确定性生成器 + 导入链路定向测试
+- [x] **F3 前后端联调**：9 个页面接真实 API、令牌轮换、单飞刷新、错误态/空态/骨架屏，18 条真实后端冒烟
 - [ ] M7 工程收尾（压测 / CI / 架构图）
 
 ## 约定

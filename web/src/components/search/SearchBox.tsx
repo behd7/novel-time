@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
-import type { SuggestItem } from '@/api/types';
-import { suggest } from '@/mocks';
+import { useSuggest } from '@/api/queries';
+import { useDebouncedValue } from '@/lib/useDebouncedValue';
 import { cn } from '@/lib/cn';
 
 type Variant = 'header' | 'hero' | 'page';
@@ -45,7 +45,6 @@ export function SearchBox({
 }: SearchBoxProps) {
   const navigate = useNavigate();
   const [value, setValue] = useState(initialValue);
-  const [items, setItems] = useState<SuggestItem[]>([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -56,17 +55,8 @@ export function SearchBox({
     setValue(initialValue);
   }, [initialValue]);
 
-  useEffect(() => {
-    const keyword = value.trim();
-    if (keyword.length === 0) {
-      setItems([]);
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setItems(suggest(keyword, 6));
-    }, 80);
-    return () => window.clearTimeout(timer);
-  }, [value]);
+  const debouncedKeyword = useDebouncedValue(value.trim(), 160);
+  const { data: items = [] } = useSuggest(debouncedKeyword);
 
   const goSearch = (keyword: string) => {
     const q = keyword.trim();

@@ -1,9 +1,10 @@
 # 夜读 · Web
 
-React 19 + TypeScript + Vite + Tailwind CSS 4 的小说阅读前端。
-当前是**高保真原型**：9 个页面、完整交互与状态，数据来自 `src/mocks`，尚未接入后端接口。
+React 19 + TypeScript + Vite + Tailwind CSS 4 的小说阅读前端。**已接入真实后端接口（P1）**：
+9 个页面读 MySQL / ES 里的数据，登录走真实 JWT，`web/src/mocks` 已删除。
 
-设计说明见 [docs/03-前端设计.md](../docs/03-前端设计.md)。
+设计说明见 [docs/03-前端设计.md](../docs/03-前端设计.md)，后端接口见
+[docs/01-设计方案.md](../docs/01-设计方案.md)。
 
 ![首页](../docs/assets/frontend/home.jpg)
 
@@ -15,15 +16,30 @@ React 19 + TypeScript + Vite + Tailwind CSS 4 的小说阅读前端。
 | 构建 | Vite 8（`@` 别名、`/api` 开发代理） |
 | 样式 | Tailwind CSS 4（`@theme` token，无组件库） |
 | 路由 | React Router 7 |
+| 服务端状态 | TanStack Query 5（缓存、去重、失效、骨架屏） |
 | 字体 | Noto Serif SC / Noto Sans SC / Inter（`@fontsource-variable` 自托管，unicode-range 切片） |
 | 图标 | lucide-react |
-| 冒烟测试 | Playwright（`scripts/smoke.mjs`） |
+| 冒烟测试 | Playwright（`scripts/smoke.mjs`，18 条断言） |
 
 ## 快速开始
+
+先起后端与中间件，并把演示数据导进库（详见仓库根 README 的「导入小说」）：
+
+```bash
+# 1. 后端（另一个终端；需要 MySQL / Redis / RabbitMQ / ES / MinIO）
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar
+
+# 2. 演示数据（首次或重置后执行；同名书会跳过）
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar \
+  --spring.profiles.active=import --novel.import.dir=deploy/samples/demo
+```
+
+再起前端：
 
 ```bash
 cd web
 pnpm install
+pnpm seed:demo   # 首次或重置库后执行，确保 bookworm 存在
 pnpm dev
 # → http://127.0.0.1:5173
 ```
@@ -35,43 +51,63 @@ pnpm dev
 NOVEL_API_TARGET=http://127.0.0.1:8080 pnpm dev
 ```
 
-## 演示账号
+生产构建由 Nginx 同域转发 `/api` 与 `/`，`VITE_API_BASE` 默认就是 `/api/v1`。
 
-原型阶段是前端模拟登录，只认这一个账号：
+## 演示账号
 
 ```
 bookworm / novel123456
 ```
 
-登录页有「一键填入」。数据存在 `localStorage` 的 `novel.demo.user`，退出登录即清空。
+这是**后端真实账号**，登录页的「一键填入」只是帮你填表；提交后走
+`POST /api/v1/auth/login`，拿到 JWT 双令牌。密码只存在后端 BCrypt 哈希里。
+新库或重置库后用 `pnpm seed:demo` 创建（幂等：已存在则登录一次确认密码）。
 
 ## 页面
 
-| 路由 | 页面 | 说明 |
+| 路由 | 页面 | 数据来源 |
 |---|---|---|
-| `/` | 首页 | Hero、继续阅读、本周热读、分类、编辑推荐、最近更新 |
-| `/browse` | 书库 | 分类树、状态/排序、网格/列表、分页 |
-| `/search` | 搜索 | 高亮命中、分类/状态/排序、建议下拉、空态 |
-| `/rank` | 榜单 | 日/周/月/总四榜，前三名重点展示 |
-| `/novel/:id` | 详情 | 评分、加入书架、简介、目录预览、书评、相似推荐 |
-| `/novel/:id/chapters` | 目录 | 每页 30 章、跳章、读到标记 |
-| `/novel/:id/chapters/:seq` | 阅读器 | 字号/行距/主题、键盘翻章、进度记忆 |
-| `/login` | 登录/注册 | 与后端一致的校验、业务码错误提示 |
-| `/styleguide` | 设计系统 | token、组件、封面版式、状态与阅读主题 |
+| `/` | 首页 | `GET /novels`（热门/最近）、`GET /ranks`、`GET /categories`、`GET /bookshelf` |
+| `/browse` | 书库 | `GET /novels?categoryId&status&sort&page&size` |
+| `/search` | 搜索 | `GET /search`、`GET /search/suggest` |
+| `/rank` | 榜单 | `GET /ranks?period&page&size` |
+| `/novel/:id` | 详情 | `GET /novels/{id}`、`/chapters`、`/reviews`、`/rating`、`/bookshelf` |
+| `/novel/:id/chapters` | 目录 | `GET /novels/{id}/chapters?page&size` |
+| `/novel/:id/chapters/:seq` | 阅读器 | `GET /novels/{id}/chapters/{seq}` |
+| `/login` | 登录/注册 | `POST /auth/login`、`POST /auth/register`、`POST /auth/refresh` |
+| `/styleguide` | 设计系统 | 静态样例（不调接口） |
+
+## 数据流
+
+```
+pages
+  → src/api/queries.ts        useQuery / useMutation 包装，统一 queryKey 与 staleTime
+  → src/api/endpoints.ts      所有后端路径、分页参数、写操作集中在这里
+  → src/api/client.ts         fetch → Result<T> 解包 → ApiError；401 单飞刷新后重放一次
+```
+
+- **access 令牌只放内存**，刷新页面即失效；**refresh 令牌放 localStorage**，启动时换一对新令牌。
+- `POST /auth/refresh` 是一次性轮换：并发 401 由 `refreshSession()` 单飞，避免后 9 个请求拿旧 jti 互相作废。
+- 写操作不自动重试；只有 401/10105 会在刷新后重放一次。
+- `GET /novels/{id}` 每次调用阅读数 +1，所以详情查询 `staleTime=5min` 且全站关掉 `refetchOnWindowFocus`。
 
 ## 目录
 
 ```
 src/
-├── api/types.ts        # 与 Java View 一一对应
+├── api/
+│   ├── client.ts       # fetch、Result 解包、令牌与单飞刷新
+│   ├── endpoints.ts    # 所有接口函数
+│   ├── queries.ts      # TanStack Query hooks 与 queryKey
+│   └── types.ts        # 与 Java View 一一对应
 ├── components/
 │   ├── book/           # NovelCover / NovelCard / NovelRow / ContinueCard
 │   ├── layout/         # SiteLayout / SiteHeader / SiteFooter
-│   ├── search/         # SearchBox（建议、键盘导航）
-│   └── ui/             # Button / Stars / Tag / Segmented / Pagination / ...
-├── features/auth/      # 登录状态（原型为 mock）
-├── lib/                # cn / format / cover / progress
-├── mocks/              # 14 本书、26 条书评、4 个榜单周期、章节正文
+│   ├── search/         # SearchBox（真实建议、键盘导航）
+│   └── ui/             # Button / Stars / Tag / Segmented / Pagination / LoadError / ...
+├── features/auth/      # 真实登录、刷新、登出
+├── features/categories/# 分类字典与树（GET /categories）
+├── lib/                # cn / format / cover / progress / useDebouncedValue
 ├── pages/              # 9 个页面
 └── styles/index.css    # @theme token、字体、阅读器主题、纸张颗粒
 ```
@@ -81,7 +117,9 @@ src/
 - 颜色、字体只从 `src/styles/index.css` 的 `@theme` 取；页面里不写死十六进制。
 - 程序化封面：书名 + 作者做 FNV-1a 哈希，选 10 组配色之一与三种版式之一；有 `coverKey` 时用 MinIO 真图。
 - 高亮 HTML 只保留 `<em>`，其余标签与属性剥掉再插入。
-- 阅读器设置与进度都存 `localStorage`；隐私模式下写入失败不打断阅读。
+- 分类是扁平数组，由 `CategoryProvider` 拼树并提供 `nameOf / topOf / childrenOf`；封面与卡片不再各自查 mock。
+- 阅读器设置与本地进度存 `localStorage`；登录且书在书架里时，额外把进度回写 `PUT /bookshelf/{id}/progress`。
+- 当前演示数据都挂在**顶级分类**下，所以书库/搜索只展示顶级分类；子类只作为题材说明，不做筛选。
 
 ## 验证
 
@@ -89,23 +127,31 @@ src/
 pnpm typecheck   # tsc -b
 pnpm build       # 产物 web/dist
 
-# 交互冒烟（需要另一个终端在跑 pnpm dev）
+# 交互冒烟（需要后端 + 演示数据 + 另一个终端在跑 pnpm dev）
 pnpm exec playwright install chromium   # 首次
 pnpm smoke
 ```
 
-`pnpm smoke` 覆盖：登录、评分、书架切换、阅读器字号持久化、键盘翻章、进度写回、搜索建议、搜索结果、空态、
-控制台零错误，共 15 条断言。CI 里没有图形环境时可传 `CHROME_PATH` 指定本机 Chromium。
+`pnpm smoke` 覆盖：真实登录、刷新后恢复会话、首页/书库真实数据、搜索建议与结果数、搜索空态、
+详情目录、评分落库、加入书架、阅读器字号持久化、键盘翻章、本地进度、服务端书架进度、
+退出登录、控制台零错误，共 **18 条断言**。
+
+Playwright 版本与已装浏览器不一致时，用 `CHROME_PATH` 指定本机 Chromium：
+
+```bash
+CHROME_PATH=/path/to/chrome pnpm smoke
+```
 
 ## 现状与下一步
 
-- **现在**：页面与交互完整，数据全部来自 `mocks`；后端未启动也能演示。
-- **P1**：接入真实接口与请求层（access 内存 + refresh 轮换 + 单飞刷新），引入 TanStack Query；
-  页面从 `mocks` 切到 hooks，`src/mocks` 只保留给 Storybook/截图使用。
-- **不要**对 `GET /api/v1/novels/{id}` 做 hover 预取或窗口聚焦重取：它每次调用都会让阅读数 +1。
+- **现在（P1 完成）**：9 个页面全部接真实接口；请求层、令牌轮换、分页、筛选、错误态、骨架屏均已接入。
+- **下一步（P2）**：路由级代码分割、图片懒加载、首屏字体 preload、Lighthouse 与无障碍实测。
+- **暂未做**：书架页、个人主页、写书评/回复、社区前端；后端接口已就绪，前端只差页面。
+- **数据现状**：库内 30 本，评分/书评很少，详情页会正常显示空态；这不是前端 bug。
 
 ## 已知取舍
 
 - SPA 没有 SSR/SEO；作品集阶段接受，真要 SEO 应换渲染方式而不是堆 meta。
 - 不引组件库，分页/Toast/浮层都是手写；多人协作时这个取舍应反过来。
 - 封面是程序化生成，不是真实素材；它的定位是「没有素材时也不难看」的兜底。
+- refresh 放 localStorage 是为了刷新后免登录；生产环境应换 `httpOnly + SameSite=Lax` Cookie，需要后端配合。

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BookOpen, Search, Sparkles } from 'lucide-react';
-import { novels } from '@/mocks';
 import { designCover } from '@/lib/cover';
 import { cn } from '@/lib/cn';
 import { Button, ButtonLink } from '@/components/ui/Button';
@@ -12,8 +11,19 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { NovelCardSkeleton } from '@/components/ui/Skeleton';
 import { Pagination } from '@/components/ui/Pagination';
 import { Segmented } from '@/components/ui/Segmented';
-import { NovelCover } from '@/components/book/NovelCover';
+import { NovelCover, type CoverNovel } from '@/components/book/NovelCover';
 import { useToast } from '@/components/ui/Toast';
+
+const COVER_SAMPLES: CoverNovel[] = [
+  { title: '长安旧事', authorName: '沈砚', categoryId: 4 },
+  { title: '剑来风雪', authorName: '温酒', categoryId: 1 },
+  { title: '长夜将尽', authorName: '顾青', categoryId: 7 },
+  { title: '星海拾遗', authorName: '陆沉', categoryId: 5 },
+  { title: '山月不知心底事', authorName: '青禾', categoryId: 8 },
+  { title: '雾都档案', authorName: '林晚', categoryId: 7 },
+  { title: '归墟', authorName: '顾青', categoryId: 3 },
+  { title: '春山如笑', authorName: '青禾', categoryId: 2 },
+];
 
 const COLORS = [
   { name: 'paper', value: '#f6f4ef', note: '页面底色' },
@@ -45,8 +55,10 @@ export function StyleguidePage() {
   const [seg, setSeg] = useState<'daily' | 'weekly'>('weekly');
 
   const coverSamples = [0, 1, 2].map((variant) => {
-    const novel = novels.find((item) => designCover(item.title, item.authorName).variant === variant);
-    return { variant, novel: novel ?? novels[variant] };
+    const novel = COVER_SAMPLES.find(
+      (item) => designCover(item.title, item.authorName).variant === variant,
+    );
+    return { variant, novel: novel ?? COVER_SAMPLES[variant] };
   });
 
   return (
@@ -192,9 +204,9 @@ export function StyleguidePage() {
             </div>
           ))}
           <div className="col-span-1">
-            <NovelCover novel={novels[6]} badge="07" />
+            <NovelCover novel={COVER_SAMPLES[6]} badge="07" />
             <p className="mt-2 text-[11px] text-muted">带序号角标</p>
-            <p className="text-[10.5px] text-faint">{novels[6].title}</p>
+            <p className="text-[10.5px] text-faint">{COVER_SAMPLES[6].title}</p>
           </div>
         </div>
       </Section>

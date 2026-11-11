@@ -2,12 +2,20 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { DEMO_CREDENTIALS, novels, toSummary } from '@/mocks';
 import { cn } from '@/lib/cn';
-import { NovelCover } from '@/components/book/NovelCover';
+import { NovelCover, type CoverNovel } from '@/components/book/NovelCover';
 import { useToast } from '@/components/ui/Toast';
 
 type Mode = 'login' | 'register';
+
+/** 后端初始化脚本建的演示账号；密码只用于这一处演示提示。 */
+const DEMO_CREDENTIALS = { username: 'bookworm', password: 'novel123456' };
+
+const BOOKWALL: CoverNovel[] = [
+  { title: '长安旧事', authorName: '沈砚', categoryId: 4 },
+  { title: '剑来风雪', authorName: '温酒', categoryId: 1 },
+  { title: '长夜将尽', authorName: '顾青', categoryId: 7 },
+];
 
 export function LoginPage() {
   const { user, login, register } = useAuth();
@@ -218,7 +226,7 @@ export function LoginPage() {
               </button>
             </div>
             <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
-              原型阶段为前端模拟登录；接后端后改为 POST /api/v1/auth/login 与 refresh 轮换。
+              账号由后端真实校验；登录后拿到 JWT，access 过期时前端会自动用 refresh 换一对新令牌。
             </p>
           </div>
 
@@ -236,13 +244,13 @@ export function LoginPage() {
 
           <div className="flex items-end justify-center gap-5">
             <div className="w-[130px] -rotate-6 opacity-80">
-              <NovelCover novel={toSummary(novels[5])} />
+              <NovelCover novel={BOOKWALL[0]} />
             </div>
             <div className="w-[170px] translate-y-4">
-              <NovelCover novel={toSummary(novels[0])} />
+              <NovelCover novel={BOOKWALL[1]} />
             </div>
             <div className="w-[130px] rotate-6 opacity-80">
-              <NovelCover novel={toSummary(novels[3])} />
+              <NovelCover novel={BOOKWALL[2]} />
             </div>
           </div>
 

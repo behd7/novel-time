@@ -1,5 +1,5 @@
 import { designCover, type CoverDesign } from '@/lib/cover';
-import { categoryName, topCategoryOf } from '@/mocks/categories';
+import { useCategoriesContext } from '@/features/categories/CategoryProvider';
 import { cn } from '@/lib/cn';
 
 const ASSET_BASE = import.meta.env.VITE_ASSET_BASE ?? 'http://127.0.0.1:9000/novel';
@@ -7,7 +7,7 @@ const ASSET_BASE = import.meta.env.VITE_ASSET_BASE ?? 'http://127.0.0.1:9000/nov
 export interface CoverNovel {
   title: string;
   authorName: string;
-  coverKey: string | null;
+  coverKey?: string | null;
   categoryId: number;
 }
 
@@ -26,8 +26,10 @@ interface NovelCoverProps {
  * 而不是十张一模一样的色块。
  */
 export function NovelCover({ novel, className, badge }: NovelCoverProps) {
+  const { topOf } = useCategoriesContext();
   const design = designCover(novel.title, novel.authorName);
   const src = novel.coverKey ? `${ASSET_BASE}/${novel.coverKey}` : null;
+  const topCategory = topOf(novel.categoryId)?.name ?? '未分类';
 
   return (
     <div
@@ -52,7 +54,7 @@ export function NovelCover({ novel, className, badge }: NovelCoverProps) {
           }}
         />
       ) : (
-        <ProceduralCover novel={novel} design={design} />
+        <ProceduralCover novel={novel} design={design} topCategory={topCategory} />
       )}
 
       {/* 书脊与整体光影：两笔就能让平面色块有"厚度" */}
@@ -68,10 +70,18 @@ export function NovelCover({ novel, className, badge }: NovelCoverProps) {
   );
 }
 
-function ProceduralCover({ novel, design }: { novel: CoverNovel; design: CoverDesign }) {
+function ProceduralCover({
+  novel,
+  design,
+  topCategory,
+}: {
+  novel: CoverNovel;
+  design: CoverDesign;
+  topCategory: string;
+}) {
   const { palette, variant, seal } = design;
   const ink = palette.ink;
-  const top = topCategoryOf(novel.categoryId)?.name ?? categoryName(novel.categoryId);
+  const top = topCategory;
 
   return (
     <div className="absolute inset-0" aria-hidden>

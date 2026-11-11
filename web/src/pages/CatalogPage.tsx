@@ -1,13 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowDownUp, ArrowRight, BookOpen, CornerDownRight } from 'lucide-react';
-import {
-  findBookshelfItem,
-  getNovel,
-  listChapters,
-  toSummary,
-} from '@/mocks';
-import { useAuth } from '@/features/auth/AuthProvider';
+import { ApiError } from '@/api/client';
+import { useBookshelf, useChapters, useNovel } from '@/api/queries';
 import { formatRelativeTime, readingPercent } from '@/lib/format';
 import { loadProgress } from '@/lib/progress';
 import { cn } from '@/lib/cn';
@@ -15,6 +10,9 @@ import { NovelCover } from '@/components/book/NovelCover';
 import { Pagination } from '@/components/ui/Pagination';
 import { ButtonLink } from '@/components/ui/Button';
 import { StatusDot, Tag } from '@/components/ui/Tag';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { LoadError } from '@/components/ui/LoadError';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { NotFoundPage } from './NotFoundPage';
 
 const PAGE_SIZE = 30;
@@ -22,22 +20,56 @@ const PAGE_SIZE = 30;
 export function CatalogPage() {
   const { id } = useParams();
   const novelId = Number(id);
-  const novel = getNovel(novelId);
-  const { user } = useAuth();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const page = Math.max(1, Number(params.get('page') ?? 1) || 1);
   const [desc, setDesc] = useState(false);
   const [jump, setJump] = useState('');
 
-  const result = useMemo(() => listChapters(novelId, page, PAGE_SIZE), [novelId, page]);
+  const novelQuery = useNovel(novelId);
+  const chaptersQuery = useChapters(novelId, { page, size: PAGE_SIZE });
+  const shelfQuery = useBookshelf();
 
-  if (!novel) {
+  if (!Number.isFinite(novelId) || novelId <= 0) {
     return <NotFoundPage />;
   }
 
-  const shelfItem = user ? findBookshelfItem(novelId) : undefined;
+  if (novelQuery.isLoading) {
+    return (
+      <div className="mx-auto max-w-[1040px] px-6 py-10 lg:px-10">
+        <Skeleton className="h-4 w-32" />
+        <div className="mt-6 flex items-center gap-6 border-b border-line pb-8">
+          <Skeleton className="aspect-[3/4] w-16" />
+          <div className="flex-1 space-y-3">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-4 w-64" />
+          </div>
+        </div>
+        <div className="mt-6 grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 12 }, (_, index) => (
+            <Skeleton key={index} className="my-3 h-6 w-full" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (novelQuery.isError) {
+    const code = novelQuery.error instanceof ApiError ? novelQuery.error.code : 0;
+    if (code === 10201 || code === 10202) return <NotFoundPage />;
+    return (
+      <div className="mx-auto max-w-[1040px] px-6 py-16 lg:px-10">
+        <LoadError error={novelQuery.error} onRetry={() => void novelQuery.refetch()} />
+      </div>
+    );
+  }
+
+  const novel = novelQuery.data;
+  if (!novel) return <NotFoundPage />;
+
+  const shelfItem = shelfQuery.data?.list.find((item) => item.novelId === novelId);
   const lastRead = loadProgress(novelId) ?? shelfItem?.lastChapterSeq ?? null;
+  const result = chaptersQuery.data ?? { list: [], total: 0, page, size: PAGE_SIZE, hasNext: false };
   const chapters = desc ? [...result.list].reverse() : result.list;
 
   const goPage = (next: number) => {
@@ -64,7 +96,7 @@ export function CatalogPage() {
       </nav>
 
       <header className="mt-6 flex flex-wrap items-center gap-6 border-b border-line pb-8">
-        <NovelCover novel={toSummary(novel)} className="w-16 shrink-0" />
+        <NovelCover novel={novel} className="w-16 shrink-0" />
         <div className="min-w-0 flex-1">
           <h1 className="font-serif text-[26px] font-semibold text-ink sm:text-[30px]">
             {novel.title}
@@ -75,7 +107,7 @@ export function CatalogPage() {
             <span>共 {novel.chapterCount} 章</span>
             <span>最后更新 {formatRelativeTime(novel.latestUpdateAt)}</span>
           </div>
-          {shelfItem && lastRead ? (
+          {lastRead ? (
             <div className="mt-3 flex items-center gap-3">
               <div className="h-[3px] w-40 overflow-hidden rounded-full bg-line">
                 <div
@@ -133,43 +165,74 @@ export function CatalogPage() {
         </div>
       </div>
 
-      <div className="mt-4 grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">
-        {chapters.map((chapter) => {
-          const current = chapter.seq === lastRead;
-          return (
-            <Link
-              key={chapter.seq}
-              to={`/novel/${novel.id}/chapters/${chapter.seq}`}
-              className={cn(
-                'group flex items-center gap-3 border-b border-line/60 py-3',
-                current && 'bg-accent-soft/50',
-              )}
+      {chaptersQuery.isError ? (
+        <LoadError
+          className="mt-6"
+          error={chaptersQuery.error}
+          onRetry={() => void chaptersQuery.refetch()}
+        />
+      ) : chaptersQuery.isLoading ? (
+        <div className="mt-4 grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 12 }, (_, index) => (
+            <Skeleton key={index} className="my-3 h-6 w-full" />
+          ))}
+        </div>
+      ) : chapters.length === 0 ? (
+        <EmptyState
+          className="mt-8"
+          title="这一页没有章节"
+          description="可能是页码超出了范围，回到第一页看看。"
+          action={
+            <button
+              type="button"
+              onClick={() => goPage(1)}
+              className="text-[12.5px] text-accent hover:text-accent-deep"
             >
-              <span
+              回到第一页
+            </button>
+          }
+        />
+      ) : (
+        <div className="mt-4 grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">
+          {chapters.map((chapter) => {
+            const current = chapter.seq === lastRead;
+            return (
+              <Link
+                key={chapter.seq}
+                to={`/novel/${novel.id}/chapters/${chapter.seq}`}
                 className={cn(
-                  'w-9 shrink-0 text-right font-serif text-[12px] tabular-nums',
-                  current ? 'text-accent' : 'text-faint',
+                  'group flex items-center gap-3 border-b border-line/60 py-3',
+                  current && 'bg-accent-soft/50',
                 )}
               >
-                {chapter.seq}
-              </span>
-              <span
-                className={cn(
-                  'min-w-0 flex-1 truncate text-[13.5px] transition-colors group-hover:text-accent',
-                  current ? 'text-accent' : 'text-ink-soft',
+                <span
+                  className={cn(
+                    'w-9 shrink-0 text-right font-serif text-[12px] tabular-nums',
+                    current ? 'text-accent' : 'text-faint',
+                  )}
+                >
+                  {chapter.seq}
+                </span>
+                <span
+                  className={cn(
+                    'min-w-0 flex-1 truncate text-[13.5px] transition-colors group-hover:text-accent',
+                    current ? 'text-accent' : 'text-ink-soft',
+                  )}
+                >
+                  {chapter.title}
+                </span>
+                {current ? (
+                  <Tag tone="accent">读到</Tag>
+                ) : (
+                  <span className="shrink-0 text-[10.5px] text-faint">
+                    {chapter.wordCount} 字
+                  </span>
                 )}
-              >
-                {chapter.title}
-              </span>
-              {current ? (
-                <Tag tone="accent">读到</Tag>
-              ) : (
-                <span className="shrink-0 text-[10.5px] text-faint">{chapter.wordCount} 字</span>
-              )}
-            </Link>
-          );
-        })}
-      </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
 
       <Pagination
         className="mt-10"

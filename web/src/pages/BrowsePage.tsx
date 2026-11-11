@@ -1,14 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { LayoutGrid, List, SlidersHorizontal } from 'lucide-react';
-import {
-  categoryName,
-  childrenOf,
-  listNovels,
-  topCategories,
-  type NovelListSort,
-} from '@/mocks';
+import { BookOpen, LayoutGrid, List, SlidersHorizontal } from 'lucide-react';
 import type { NovelSummary } from '@/api/types';
+import { useNovels } from '@/api/queries';
+import { useCategoriesContext } from '@/features/categories/CategoryProvider';
 import { formatCount, formatRating, formatWordCount } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { NovelCard } from '@/components/book/NovelCard';
@@ -16,9 +11,12 @@ import { NovelCover } from '@/components/book/NovelCover';
 import { Pagination } from '@/components/ui/Pagination';
 import { Segmented } from '@/components/ui/Segmented';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { LoadError } from '@/components/ui/LoadError';
+import { NovelCardSkeleton, NovelRowSkeleton } from '@/components/ui/Skeleton';
 import { Stars } from '@/components/ui/Stars';
 import { StatusDot, Tag } from '@/components/ui/Tag';
-import { BookOpen } from 'lucide-react';
+
+type NovelListSort = 'latest' | 'newest' | 'wordCount' | 'hot';
 
 const SORT_OPTIONS: { value: NovelListSort; label: string }[] = [
   { value: 'latest', label: '最近更新' },
@@ -27,24 +25,32 @@ const SORT_OPTIONS: { value: NovelListSort; label: string }[] = [
   { value: 'hot', label: '热度' },
 ];
 
+const SORT_VALUES = new Set(SORT_OPTIONS.map((option) => option.value));
+
 export function BrowsePage() {
   const [params, setParams] = useSearchParams();
+  const { topCategories, nameOf, isLoading: categoriesLoading } = useCategoriesContext();
+
   const categoryId = Number(params.get('category') ?? 0) || 0;
   const statusParam = params.get('status');
-  const status = statusParam === null ? undefined : Number(statusParam);
-  const sort = (params.get('sort') as NovelListSort | null) ?? 'latest';
+  const status =
+    statusParam === '0' || statusParam === '1' ? Number(statusParam) : undefined;
+  const rawSort = params.get('sort');
+  const sort: NovelListSort =
+    rawSort && SORT_VALUES.has(rawSort as NovelListSort) ? (rawSort as NovelListSort) : 'latest';
   const page = Math.max(1, Number(params.get('page') ?? 1) || 1);
   const [view, setView] = useState<'grid' | 'list'>('grid');
 
-  const result = useMemo(
-    () => listNovels({ categoryId: categoryId || undefined, status, sort, page, size: 12 }),
-    [categoryId, status, sort, page],
-  );
+  const { data, isLoading, isError, error, refetch } = useNovels({
+    categoryId: categoryId || undefined,
+    status,
+    sort,
+    page,
+    size: 12,
+  });
 
-  const activeTop = topCategories.find(
-    (category) => category.id === categoryId || childrenOf(category.id).some((child) => child.id === categoryId),
-  );
-  const activeChildren = activeTop ? childrenOf(activeTop.id) : [];
+  const result = data ?? { list: [], total: 0, page, size: 12, hasNext: false };
+  const activeTop = topCategories.find((category) => category.id === categoryId);
 
   const update = (next: Record<string, string | number | undefined>) => {
     const merged = new URLSearchParams(params);
@@ -59,10 +65,11 @@ export function BrowsePage() {
     setParams(merged, { replace: true });
   };
 
+  // 旧链接可能带着子分类 id；当前数据是按顶级分类收的，落到不存在的分类就退回全部
   useEffect(() => {
-    if (categoryId && !activeTop) update({ category: undefined });
+    if (categoryId && !categoriesLoading && !activeTop) update({ category: undefined });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryId]);
+  }, [categoryId, categoriesLoading, activeTop]);
 
   return (
     <div className="mx-auto max-w-[1240px] px-6 pb-24 pt-12 lg:px-10 lg:pt-16">
@@ -70,11 +77,11 @@ export function BrowsePage() {
         <div>
           <p className="text-[10.5px] tracking-[0.28em] text-accent">LIBRARY</p>
           <h1 className="mt-3 font-serif text-[34px] font-semibold text-ink sm:text-[40px]">
-            {categoryId ? categoryName(categoryId) : '全部书库'}
+            {categoryId ? nameOf(categoryId) : '全部书库'}
           </h1>
           <p className="mt-2 text-[12.5px] text-muted">
             共 {result.total} 本 ·{' '}
-            {categoryId ? `收录于「${categoryName(categoryId)}」` : '按题材、状态与热度慢慢挑'}
+            {categoryId ? `收录于「${nameOf(categoryId)}」` : '按题材、状态与热度慢慢挑'}
           </p>
         </div>
         <p className="hidden max-w-xs text-right text-[11.5px] leading-relaxed text-faint sm:block">
@@ -85,7 +92,7 @@ export function BrowsePage() {
       </header>
 
       <div className="mt-10 grid gap-10 lg:grid-cols-[210px_1fr] lg:gap-14">
-        {/* 分类树 */}
+        {/* 分类：后端返回两级，但当前书都挂在顶级分类下，所以只展示顶级 */}
         <aside className="lg:sticky lg:top-24 lg:self-start">
           <div className="flex items-center gap-2 text-[10.5px] tracking-[0.24em] text-faint">
             <SlidersHorizontal size={12} />
@@ -101,41 +108,22 @@ export function BrowsePage() {
               )}
             >
               全部
-              <span className="ml-2 text-[10.5px] text-faint">{listNovels({ size: 1 }).total}</span>
             </button>
             {topCategories.map((category) => {
-              const active = activeTop?.id === category.id;
+              const active = category.id === categoryId;
               return (
-                <div key={category.id} className="lg:border-b lg:border-line/60">
-                  <button
-                    type="button"
-                    onClick={() => update({ category: category.id })}
-                    className={cn(
-                      'flex h-9 items-center gap-2 text-left text-[13.5px] transition-colors lg:w-full lg:pr-2',
-                      active ? 'text-accent' : 'text-muted hover:text-ink',
-                    )}
-                  >
-                    {active ? <span className="h-1 w-1 rounded-full bg-accent" /> : null}
-                    {category.name}
-                  </button>
-                  {active && activeChildren.length ? (
-                    <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 pl-3 lg:flex-col lg:gap-y-0.5">
-                      {activeChildren.map((child) => (
-                        <button
-                          key={child.id}
-                          type="button"
-                          onClick={() => update({ category: child.id })}
-                          className={cn(
-                            'py-1 text-left text-[12px] transition-colors lg:py-1.5',
-                            child.id === categoryId ? 'text-accent' : 'text-faint hover:text-ink-soft',
-                          )}
-                        >
-                          {child.name}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
+                <button
+                  key={category.id}
+                  type="button"
+                  onClick={() => update({ category: category.id })}
+                  className={cn(
+                    'flex h-9 items-center gap-2 text-left text-[13.5px] transition-colors lg:w-full lg:border-b lg:border-line/60 lg:pr-2',
+                    active ? 'text-accent' : 'text-muted hover:text-ink',
+                  )}
+                >
+                  {active ? <span className="h-1 w-1 rounded-full bg-accent" /> : null}
+                  {category.name}
+                </button>
               );
             })}
           </nav>
@@ -216,12 +204,28 @@ export function BrowsePage() {
             </div>
           </div>
 
-          {result.list.length === 0 ? (
+          {isError ? (
+            <LoadError className="mt-10" error={error} onRetry={() => void refetch()} />
+          ) : isLoading ? (
+            view === 'grid' ? (
+              <div className="mt-8 grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: 12 }, (_, index) => (
+                  <NovelCardSkeleton key={index} />
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4">
+                {Array.from({ length: 5 }, (_, index) => (
+                  <NovelRowSkeleton key={index} />
+                ))}
+              </div>
+            )
+          ) : result.list.length === 0 ? (
             <EmptyState
               className="mt-10"
               icon={<BookOpen size={26} strokeWidth={1.2} />}
               title="这里还没有书"
-              description="换个分类或状态试试。演示库只放了 14 本书，正式数据导入后会丰富起来。"
+              description="换个分类或状态试试。"
             />
           ) : view === 'grid' ? (
             <div className="mt-8 grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 xl:grid-cols-4">
@@ -251,6 +255,7 @@ export function BrowsePage() {
 }
 
 function BrowseRow({ novel }: { novel: NovelSummary }) {
+  const { nameOf } = useCategoriesContext();
   return (
     <Link
       to={`/novel/${novel.id}`}
@@ -274,7 +279,7 @@ function BrowseRow({ novel }: { novel: NovelSummary }) {
           <span>{formatWordCount(novel.wordCount)}</span>
           <span>{novel.chapterCount} 章</span>
           <span>{formatCount(novel.viewCount)} 阅读</span>
-          <Tag>{categoryName(novel.categoryId)}</Tag>
+          <Tag>{nameOf(novel.categoryId)}</Tag>
         </div>
       </div>
     </Link>
