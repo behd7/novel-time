@@ -74,4 +74,20 @@ public interface OutboxMapper extends BaseMapper<OutboxEntity> {
     /** 重建开始前记下的水位：此刻之后新登记的变更才需要补写。 */
     @Select("SELECT COALESCE(MAX(id), 0) FROM outbox")
     long selectMaxId();
+
+    /** 待投递条数，给 {@code novel.outbox.pending} 仪表用。走 {@code idx_poll} 的索引前缀。 */
+    @Select("SELECT COUNT(*) FROM outbox WHERE status = 0")
+    long countPending();
+
+    /**
+     * 最老一条待投递记录已经等了多久（秒），给 {@code novel.outbox.lag.seconds} 仪表用。
+     *
+     * <p>差值刻意交给 MySQL 算，不在应用侧 {@code now - created_at}：{@code created_at} 是数据库
+     * 默认值，取的是数据库时区；应用侧的时间取应用时区。容器里两边差 8 小时的话，
+     * 这个指标会稳定地报一个假数——和重建水位用 id 而不用时间，是同一个坑。
+     *
+     * <p>没有待投递行时返回 {@code null}，由调用方翻译成 0。
+     */
+    @Select("SELECT TIMESTAMPDIFF(SECOND, MIN(created_at), NOW()) FROM outbox WHERE status = 0")
+    Long selectPendingLagSeconds();
 }

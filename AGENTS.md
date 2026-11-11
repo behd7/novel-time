@@ -201,7 +201,7 @@
 | 搜索 | Elasticsearch 8.13 | IK 分词、BM25、高亮；**MySQL 才是真相源** |
 | 对象存储 | MinIO（S3 协议） | 封面/头像/导入原文件，预签名直传 |
 | 持久层 | MyBatis-Plus 3.5.7 + Flyway | SQL 可控，schema 版本化 |
-| 文档 / 监控 | SpringDoc OpenAPI 3 + Actuator/Micrometer | Swagger 即接口演示界面 |
+| 文档 / 监控 | SpringDoc OpenAPI 3 + Actuator/Micrometer + Prometheus/Grafana | Swagger 即接口演示界面；四个业务指标见 §2.6 |
 | 前端 | React 19 + TypeScript + Vite 8 + Tailwind 4 + TanStack Query 5 | `web/`，不引组件库；已接真实 API |
 
 ### 2.3 模块与依赖方向
@@ -292,6 +292,7 @@ com.novel.infra
 ├── mq/{NovelSearchSyncConsumer, NovelSearchSyncHandler, NovelSearchSyncMessage,
 │       ConsumeLogRepository, ConsumeLogEntity}
 ├── job/{ViewCountFlushJob, RatingRecalcJob, RankRefreshJob}
+├── metrics/{BacklogMetrics}                # Outbox 积压/滞后、死信深度三个 Gauge；失败保留上次值
 ├── storage/{S3StorageAdapter, StorageProperties}
 └── health/DependencyHealthChecker
 
@@ -303,6 +304,7 @@ com.novel.api
 │               SearchController, RankController, FileController, SystemController, dto/*}
 ├── importing/{NovelImportRunner, NovelReindexRunner, RankRefreshRunner}   # @Profile("import" / "reindex" / "rank")，跑完 System.exit
 │               demo/{DemoNovelLibrary, DemoNovelWriter, DemoProse, DemoNovel}  # 纯 JDK 演示数据生成器，不依赖 Spring
+│               demo/BulkNovelSeedRunner     # @Profile("seed")，批量造压测数据，幂等可续跑
 ├── security/{JwtAuthenticationFilter, RestAuthenticationEntryPoint, RestAccessDeniedHandler,
 │             SecurityResponses, LoginUser, SecurityUtils}
 └── web/{TraceIdFilter, ResponseTraceAdvice, GlobalExceptionHandler}
@@ -335,6 +337,7 @@ Client
   → TraceIdFilter（traceId 入 MDC + 响应头 X-Trace-Id）
   → Spring Security 过滤器链
       ├─ 放行：/api/v1/auth/**、/api/v1/system/**、/swagger-ui/**、/v3/api-docs/**、/actuator/health
+      │        /actuator/prometheus（抓取方是监控系统，不是用户，没有也不该有令牌）
       ├─ JwtAuthenticationFilter：解析 Bearer → SecurityContext(LoginUser)
       └─ 失败：RestAuthenticationEntryPoint(401) / RestAccessDeniedHandler(403)，响应体与 Result 同构
   → Controller（@Validated 入参校验）
@@ -418,6 +421,26 @@ Client
 - 索引初始化用 `SmartLifecycle`（`phase = Integer.MIN_VALUE`），必须早于 Rabbit 监听器：别名缺失时任何写入都会让 ES 自动建出**同名索引**，之后别名再也建不起来。真遇到了删掉同名索引重启即可。
 - `viewCount` 是**快照**：只在导入、评分、对账、重建时写入，阅读数按分钟落库不触发同步，所以"最热"排序与结果里的阅读数最多滞后一天，M5 接入真实 `hotScore` 后由它接管。
 
+**可观测**（`BacklogMetrics` + `RedisNovelCache` + `RankRefreshJob` → `deploy/grafana`）：
+
+| 指标 | 类型 | 说明 |
+|---|---|---|
+| `novel.cache.requests{cache,result}` | Counter | `cache=chapter`（2h TTL）/ `categories`（10m TTL），命中率 = hit/(hit+miss) |
+| `novel.outbox.pending` | Gauge | `outbox` 中 `status=0` 的条数，走 `idx_poll` 前缀 |
+| `novel.outbox.lag.seconds` | Gauge | 最老一条待投递已等的秒数；差值由 MySQL 算（`TIMESTAMPDIFF`），避开应用库时区差 |
+| `novel.mq.dead.letters` | Gauge | `q.novel.dead` 深度，来自 `AmqpAdmin.getQueueInfo` |
+| `novel.rank.refresh` / `.failures` | Timer / Counter | 一轮结算耗时与抛异常次数 |
+
+- 三个 Gauge 都是**拉模型**：Prometheus 抓一次算一次，空闲零开销；代价是读数发生在抓取线程上，
+  所以统一套了"失败保留上次值、从未读到返回 NaN"的包装——一次 DB/broker 抖动不该让整份抓取变 500，
+  而"未知"也不能画成 0，否则图上会出现假的积压清零。
+- **P99 必须开桶**：`management.metrics.distribution.percentiles-histogram` 只对
+  `http.server.requests` 与 `novel.rank.refresh` 打开。不开时只有 `_count/_sum/_max`，
+  `histogram_quantile` 恒返回 NaN——面板看着像没流量，其实没导出桶。
+- 应用在宿主机跑，Prometheus 在容器里，所以 compose 给了 `extra_hosts: host-gateway`，
+  抓取目标是 `host.docker.internal:8080`；少这一行只会得到 connection refused。
+- Grafana 映射 **3001**（3000 常被本地别的服务占着），数据源与面板全部由 `deploy/grafana` 挂载预置。
+
 ### 2.7 数据模型（21 张表）
 
 | 域 | 表 |
@@ -480,6 +503,10 @@ Client
 > `import` profile 关掉 `novel.search.enabled` 与 `novel.outbox.enabled`：导入进程只写库，
 > 不建索引也不投递（短命进程等不到 broker 确认就退出了）。留库里的待投递行由常驻服务补发。
 
+> `seed` profile（`application-seed.yml`）：只写库，关掉 search / outbox / rank，避免短命进程做无用功。
+> 造数参数 `novel.seed.books`(5000) / `chapters-min`(8) / `chapters-max`(40)，可用
+> `--novel.seed.books=20000` 覆盖。以标题前缀 `压测样本-` 计数实现幂等，只补差额。
+
 ### 2.10 常用命令
 
 ```bash
@@ -501,6 +528,16 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active
 # 手动结算榜单（不起 Web；日/周/月/总四个周期各算一遍后退出）
 java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=rank
 
+# 批量造压测数据（不起 Web；以标题前缀"压测样本-"计数，只补差额，中断可续跑）
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=seed
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=seed --novel.seed.books=20000
+
+# 监控栈（Prometheus :9090，Grafana :3001 面板 "Novel · 读链路与投递"）
+docker compose -f deploy/docker-compose.yml up -d prometheus grafana
+
+# 读链路压测（需先造数；按列表40%/详情30%/正文25%/分类5% 混合）
+docker run --rm -i --network host -e VUS=30 grafana/k6:0.54.0 run - < deploy/loadtest/read-path.js
+
 # 生成 28 本演示书（纯 JDK，不连库）→ 再用上面的 import 命令导 deploy/samples/demo
 java -cp novel-api/target/classes com.novel.api.importing.demo.DemoNovelWriter deploy/samples/demo
 
@@ -511,7 +548,7 @@ cd web && pnpm typecheck && pnpm build
 cd web && pnpm smoke                      # 36 条真实后端断言；需后端 + 演示数据 + dev 在跑
 
 # 测试
-mvn test                                  # 189 个用例，含 Testcontainers（需 Docker）
+mvn test                                  # 210 个用例，含 Testcontainers（需 Docker）
 mvn test -Dtest=ArchitectureTest          # 只跑架构约束
 mvn test -Dtest=SchemaMigrationTest       # 只跑 Flyway 迁移
 mvn test -Dtest=AuthFlowIntegrationTest   # 认证链路端到端
@@ -529,6 +566,10 @@ mvn test -Dtest=SearchQueryTest            # 搜索入参边界
 mvn test -Dtest=RankPeriodTest             # 榜单周期归属，含 ISO 周跨年
 mvn test -Dtest=HotScoreCalculatorTest     # 热度公式边界（负计数、时钟回拨、除零）
 mvn test -Dtest=RankFlowIntegrationTest    # 行为→结算→读榜端到端
+mvn test -Dtest=BacklogMetricsTest         # 仪表读数语义：无积压为 0、读失败留上次值、首读失败为 NaN
+mvn test -Dtest=RedisNovelCacheTest        # 命中率埋点：反序列化失败计 miss，不虚高
+mvn test -Dtest=RankRefreshJobTest         # 结算抛异常不外抛且失败计数 +1
+mvn test -Dtest=BulkNovelSeedRunnerTest    # 造数落库一致性 + 幂等续跑（Testcontainers MySQL）
 mvn test -Dtest=DemoNovelWriterTest,DemoNovelImportTest \
   -Dsurefire.failIfNoSpecifiedTests=false   # 演示数据生成与导入链路（不跑全量）
 ```
@@ -550,7 +591,8 @@ mvn test -Dtest=DemoNovelWriterTest,DemoNovelImportTest \
 - [x] **F4 书架与个人主页**：书架筛选/移出/继续阅读、个人资料编辑、后端统计/正在读/书架预览
 - [x] **F5 社区与书评**：帖子列表/详情/发帖、两层评论与点赞、书评写入/回复/点赞/删除、他人主页
 - [x] **F6 资料字段与我的内容**：性别/生日编辑、按用户查书评/帖子、个人主页内容列表，36 条真实后端冒烟
-- [ ] M7 工程收尾（压测 / CI / 架构图）
+- [x] **M7 可观测与压测基线**：Prometheus 四个业务指标 + Grafana 预置面板、`seed` 批量造数（5000 本 / 12 万章）、k6 读链路压测（30 VU → 673.8 req/s，p95 70.0ms，0 失败）
+- [ ] M7 剩余（CI / 架构图 / 连接池调优）
 
 ### 2.12 前端（web/，已接真实接口）
 

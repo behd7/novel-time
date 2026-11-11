@@ -1,0 +1,38 @@
+# 压测造数专用 profile：不起 Web 服务，造完 BulkNovelSeedRunner 自动退出
+#
+#   java -jar novel-api.jar --spring.profiles.active=seed
+#   java -jar novel-api.jar --spring.profiles.active=seed --novel.seed.books=20000
+#
+# 造完数要让书能被搜到，再跑一次 --spring.profiles.active=reindex。
+spring:
+  main:
+    web-application-type: none
+  rabbitmq:
+    listener:
+      simple:
+        # 造数进程只写库，不消费消息：它是短命进程，消息处理到一半被 System.exit 收掉，
+        # 只会留下半成品状态，交给常驻服务消费更干净
+        auto-startup: false
+
+novel:
+  seed:
+    # 默认 5000 本 / 每本 8~40 章：约 12 万章、80MB 正文。
+    # 这个量级的用意是让列表分页、排序、正文回源都跨过"一页塞得下"的规模，
+    # 再小的话所有查询都被缓冲池吸收，压测数字只会是 JVM 的成绩
+    books: ${NOVEL_SEED_BOOKS:5000}
+    chapters-min: ${NOVEL_SEED_CHAPTERS_MIN:8}
+    chapters-max: ${NOVEL_SEED_CHAPTERS_MAX:40}
+  search:
+    # 不建索引：造数进程不写 outbox，也就没有增量要同步；
+    # 全量索引在 reindex profile 里重建
+    enabled: false
+  outbox:
+    # 不投递：投递确认还没回来 JVM 就退出了。这些书本来也不需要同步事件
+    enabled: false
+  rank:
+    # 不结算榜单：一本书都没有的实时层结算出来也是空快照，白扫一遍表
+    enabled: false
+
+logging:
+  level:
+    com.novel: info

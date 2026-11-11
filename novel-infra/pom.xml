@@ -78,6 +78,13 @@
             <artifactId>spring-security-crypto</artifactId>
         </dependency>
 
+        <!-- 指标埋点：这里只依赖 Micrometer 的 API，注册表（Prometheus）由 novel-api 决定。
+             infra 负责"哪里值得观测"，不管"观测结果送到哪"——和端口倒置是同一个理由。 -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+
         <!-- 对象存储：走 S3 协议，不绑死 MinIO SDK -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>

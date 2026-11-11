@@ -1,0 +1,11 @@
+apiVersion: 1
+
+# 数据源也走预置：手动加数据源这一步最容易漏，漏了之后面板全是 "Datasource not found"。
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

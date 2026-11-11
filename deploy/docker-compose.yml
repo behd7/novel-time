@@ -79,7 +79,51 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  prometheus:
+    # 抓 application.yml 里已暴露的 /actuator/prometheus。
+    # 应用跑在宿主机（mvn spring-boot:run）而不是容器里，所以要走 host-gateway 才能回连；
+    # 少这一行，面板上会一直是一条 DOWN，且报错只有 "connection refused"，很难往网络方向想。
+    # 版本固定，不用 latest：latest 一升级，面板里查不到指标时很难判断是代码问题还是版本变了
+    image: prom/prometheus:v2.54.1
+    container_name: novel-prometheus
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # 7 天够看"昨天下午那次压测"，再长就是在本地攒垃圾
+      - --storage.tsdb.retention.time=7d
+    restart: unless-stopped
+
+  grafana:
+    # 端口映射到 3001：3000 常被别的本地服务（Loki、Langfuse 之类）占着，
+    # 抢端口会让人以为是 Grafana 装坏了
+    image: grafana/grafana:11.3.0
+    container_name: novel-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=novel
+      - GF_SECURITY_ADMIN_PASSWORD=novel12345
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # 面板与数据源全部由文件预置，第一次打开就有图，不需要手工点 "Add data source"
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   es-data:
   minio-data:
   redis-data:
+  prometheus-data:
+  grafana-data:

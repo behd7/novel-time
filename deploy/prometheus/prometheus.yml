@@ -1,0 +1,19 @@
+# Prometheus 抓取配置（本机开发用）
+#
+# 目标只有应用自己：中间件的自监控（MySQL exporter 之类）刻意没接——
+# 这里的目的是回答"我的设计有没有按预期工作"，不是搭一套运维监控平台。
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: novel-api
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          # 应用在宿主机跑（mvn spring-boot:run / java -jar），不在 compose 网络里。
+          # host.docker.internal 由 compose 里的 extra_hosts: host-gateway 提供。
+          # 若仍是 DOWN，把这里换成 `ip route | grep default` 里的网关地址再试。
+          - "host.docker.internal:8080"
+        labels:
+          application: novel

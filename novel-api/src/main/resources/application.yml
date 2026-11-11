@@ -196,6 +196,14 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+    distribution:
+      # 不开这个，Prometheus 里只有 * _count / _sum / _max，没有 _bucket，
+      # 面板上的 histogram_quantile(P99) 会永远显示 No data——看着像"没流量"，
+      # 其实是指标根本没导出桶。只给要算分位数的两个计时器开，别的保持默认，
+      # 避免全站指标桶基数翻几倍。
+      percentiles-histogram:
+        http.server.requests: true
+        novel.rank.refresh: true
 
 logging:
   pattern:

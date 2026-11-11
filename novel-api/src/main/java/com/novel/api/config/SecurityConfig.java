@@ -48,6 +48,10 @@ public class SecurityConfig {
             "/swagger-ui/**",
             "/v3/api-docs/**",
             "/actuator/health",
+            // Prometheus 抓取端：抓取方是监控系统，不是用户，它没有令牌也不该有令牌。
+            // 只放行 prometheus 这一个，/actuator/metrics 等调试端点仍然要求认证——
+            // 后者会把内部组件名、缓存名、桶分布全暴露出来，不该和监控入口一起放开。
+            "/actuator/prometheus",
     };
 
     @Bean

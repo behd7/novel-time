@@ -16,6 +16,7 @@
 | 对象存储 | MinIO（S3 协议） | 封面/头像/导入原文件 |
 | 持久层 | MyBatis-Plus 3.5.7 + Flyway | SQL 可控，schema 版本化 |
 | 文档 | SpringDoc OpenAPI 3 | `/swagger-ui.html` 就是接口演示界面 |
+| 可观测 | Micrometer + Prometheus + Grafana | 缓存命中率 / Outbox 滞后 / 死信深度 / 结算耗时，见「可观测与压测」 |
 | 前端 | React 19 + TS + Vite 8 + Tailwind 4 + TanStack Query | `web/`，已接真实 API |
 
 ## 模块划分
@@ -107,7 +108,92 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar
 | http://127.0.0.1:8080/api/v1/system/ping | 存活探针 |
 | http://127.0.0.1:8080/api/v1/system/dependencies | **中间件体检**（MySQL/Redis/MQ/ES/MinIO + 搜索索引状态） |
 | http://127.0.0.1:8080/actuator/health | Actuator 健康检查 |
+| http://127.0.0.1:8080/actuator/prometheus | 指标原始输出（免登录，供 Prometheus 抓取） |
+| http://127.0.0.1:9090 | Prometheus（需 `docker compose up -d prometheus`） |
+| http://127.0.0.1:3001 | Grafana 面板「Novel · 读链路与投递」（匿名可看） |
 | http://127.0.0.1:5173 | 前端（需先 `cd web && pnpm dev`，数据来自后端） |
+
+## 可观测与压测
+
+压测要回答的不是"能不能跑"，而是"在哪里先坏"。所以先接四个指标，再打读链路，
+最后看面板曲线而不是 k6 的汇总表——汇总表告诉你结果，曲线告诉你原因。
+
+### 起监控栈
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d prometheus grafana
+```
+
+- Prometheus `http://127.0.0.1:9090`，抓 `host.docker.internal:8080/actuator/prometheus`
+  （应用跑在宿主机，不在 compose 网络里，所以 compose 给了 `extra_hosts: host-gateway`）
+- Grafana `http://127.0.0.1:3001`，面板「Novel · 读链路与投递」；数据源与面板都由文件挂载预置，
+  第一次打开就有图，不需要手工添加
+- 端口是 3001 不是 3000：3000 常被别的本地服务占着，抢端口会让人以为 Grafana 装坏了
+
+### 四个指标
+
+| 指标 | Prometheus 名字 | 回答的问题 |
+|---|---|---|
+| 章节 / 分类缓存命中 | `novel_cache_requests_total{cache,result}` | 正文缓存到底省了多少次回源 |
+| Outbox 待投递与滞后 | `novel_outbox_pending` / `novel_outbox_lag_seconds` | "不丢消息"没法直接观测，"消息多晚才到"可以 |
+| 死信队列深度 | `novel_mq_dead_letters` | 坏消息是留了现场，还是进了黑洞 |
+| 榜单结算耗时与失败 | `novel_rank_refresh_seconds` / `novel_rank_refresh_failures_total` | 定时任务有没有悄悄每轮都失败 |
+
+两个刻意的设计：
+
+- **读不到就不画假线**。仪表读取失败时保留上一次成功值；应用刚启动、一次都没读到时是 `NaN` 而不是 0。
+  "不知道"和"零积压"必须是两种颜色，否则一次数据库抖动就会在图上画出一条假的清零谷。
+- **P99 需要直方图桶**。没开 `management.metrics.distribution.percentiles-histogram` 时，
+  Prometheus 里只有 `_count` / `_sum` / `_max`，`histogram_quantile` 永远返回 NaN——
+  面板看着像"没流量"，其实是压根没导出桶。
+
+### 造压测数据
+
+```bash
+# 默认 5000 本 / 每本 8~40 章，约 12 万章；可用 --novel.seed.books=20000 放大
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=seed
+# 造数进程不写 outbox，索引要单独建
+java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=reindex
+```
+
+幂等：以标题前缀 `压测样本-` 计数，只补差额，中断后重跑会接着造，不会重复也不会留半本
+（每本书一个事务）。清干净：
+
+```sql
+DELETE FROM chapter_content WHERE novel_id IN (SELECT id FROM novel WHERE title LIKE '压测样本-%');
+DELETE FROM chapter         WHERE novel_id IN (SELECT id FROM novel WHERE title LIKE '压测样本-%');
+DELETE FROM novel           WHERE title LIKE '压测样本-%';
+```
+
+### 压测
+
+```bash
+docker run --rm -i --network host -e VUS=30 grafana/k6:0.54.0 run - < deploy/loadtest/read-path.js
+```
+
+按列表 40% / 详情 30% / 正文 25% / 分类 5% 混合。详情接口每次访问都会让阅读数 +1，
+混进读链路才能看到"最热的读接口同时也在写"时的真实排队。
+
+### 当前基线（2026-11-11，本机）
+
+| 项 | 数值 |
+|---|---|
+| 数据量 | 5,030 本 / 120,974 章 |
+| 压测结果 | 30 VU / 75s，48,138 请求，**673.8 req/s**，失败 **0%** |
+| 端到端延迟 | avg 42.8ms / p95 70.0ms / max 158.8ms |
+| 接口 P99 | 列表 88.9ms / 详情 84.6ms / 正文 80.1ms / 分类 30.1ms |
+| 章节缓存命中率 | 预热后 100%；首波 20 并发里有 19 次未命中 |
+| 榜单结算 | 当日/周/月三榜合计 < 100ms；**总榜 P95 ≈ 40s**（5030 本直接扫 `novel` 全表算分） |
+
+![Grafana 面板](docs/assets/observability/dashboard.png)
+
+> 总榜那 40 秒是接上指标后才看见的：它一直是"能算完就行"的实现，数据量从 30 本涨到 5030 本，
+> 耗时跟着线性涨，而没有任何地方会因此报错。这正是"没有数字就看不出瓶颈"的例子——
+> 下一轮要动的是总榜，不是日榜。
+
+> 约 40ms 的延迟地板不是代码问题：本地 MySQL 与 RabbitMQ 跑在 Windows 宿主机，
+> WSL 通过 mirrored 网络访问，每查一次都带一次跨栈往返。要压出应用本身的极限，
+> 得先把 MySQL 挪进 WSL——所以这组数字适合看"变化趋势"，不适合和其他机器横向比。
 
 ## 前端（web/）
 
@@ -158,7 +244,7 @@ curl http://127.0.0.1:8080/api/v1/users/me -H "Authorization: Bearer $ACCESS_TOK
 ### 测试
 
 ```bash
-mvn test                                    # 187 个用例（含 Testcontainers，需要 Docker）
+mvn test                                    # 210 个用例（含 Testcontainers，需要 Docker）
 mvn test -Dtest=ArchitectureTest            # 只跑架构约束
 mvn test -Dtest=AuthFlowIntegrationTest     # 认证链路端到端（起 MySQL + Redis 容器）
 mvn test -Dtest=AuthServiceTest             # 认证业务逻辑单元测试（纯 Mock，1 秒内跑完）
@@ -168,6 +254,10 @@ mvn test -Dtest=ReviewFlowIntegrationTest   # 评分/书评/点赞端到端
 mvn test -Dtest=RatingServiceTest           # 评分增量聚合单测
 mvn test -Dtest=PostFlowIntegrationTest     # 社区发帖/引用/点赞/评论端到端
 mvn test -Dtest=PostServiceTest             # 社区计数回退与详情自增边界单测
+mvn test -Dtest=BacklogMetricsTest          # Outbox/死信仪表读数语义（含 NaN 与保留上次值）
+mvn test -Dtest=RedisNovelCacheTest         # 缓存命中率埋点
+mvn test -Dtest=RankRefreshJobTest          # 结算失败计数不外抛
+mvn test -Dtest=BulkNovelSeedRunnerTest     # 造数落库一致性（Testcontainers MySQL）
 ```
 
 ## 阅读
@@ -340,7 +430,8 @@ java -jar novel-api/target/novel-api-0.1.0-SNAPSHOT.jar --spring.profiles.active
 - [x] **F4 书架与个人主页**：书架筛选/移出/继续阅读、个人资料编辑、统计/正在读/书架预览，26 条真实后端冒烟
 - [x] **F5 社区与书评**：帖子列表/详情/发帖、两层评论与点赞、书评写入/回复/点赞/删除、他人主页
 - [x] **F6 资料字段与我的内容**：性别/生日编辑、按用户查书评/帖子、个人主页内容列表，36 条真实后端冒烟
-- [ ] M7 工程收尾（压测 / CI / 架构图）
+- [x] **M7 可观测与压测基线**：Prometheus 四个指标 + Grafana 面板 + 5000 本造数命令 + k6 读链路压测（673.8 req/s / p95 70.0ms）
+- [ ] M7 剩余（CI / 架构图 / 连接池调优）
 
 ## 约定
 
